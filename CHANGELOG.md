@@ -599,6 +599,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### binary-codec
+
+- Added XLS-96 confidential MPT field and transaction type definitions (`ConfidentialMPTSend`, `ConfidentialMPTConvert`, `ConfidentialMPTConvertBack`, `ConfidentialMPTMergeInbox`, `ConfidentialMPTClawback`).
+
+
 #### xrpl
 
 - Added method `GetAccountObjects` and `GetAccountLines` to testutil `client` interface-
