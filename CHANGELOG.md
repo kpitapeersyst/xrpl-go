@@ -7,11 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### binary-codec
+
+- Added protocol definitions and canonical wire encoding for all five XLS-96 confidential MPT transaction types and their ledger fields.
+
+#### confidential
+
+- Added CGo-backed ElGamal encryption, Pedersen commitments, context hashes, proof generation and verification, plus a no-CGo fallback that returns `ErrCgoRequired`.
+- Added checked-in `mpt-crypto` 1.0.2 bundles for Linux and macOS on AMD64 and ARM64, with dependency provenance, artifact checksums, and reproducible update tooling.
+- Added native, no-CGo, signed-vector, and pinned-ledger lifecycle release gates.
+
+#### confidential/builder
+
+- Added online `Build*` and offline `Prepare*` helpers for confidential MPT convert, convert-back, send, merge-inbox, and clawback transactions, including tickets, bounded decryption, destination tags, credentials, and optional auditors.
+
+#### docs
+
+- Added XLS-96 package, platform, security, fee, compatibility, and builder documentation.
+
+#### pkg/hexutil
+
+- Added `DecodeFixedHex()` to decode hexadecimal values and enforce their decoded byte length.
+
+#### xrpl/hash
+
+- Added `MPToken()` and `MPTokenIssuance()` helpers for computing MPT ledger-entry indexes.
+
+#### xrpl/transaction
+
+- Added five confidential MPT transaction models, protocol role and amount validation, confidential issuance flags and encryption keys, and confidential ledger-entry fields.
+
+#### xrpl/wallet
+
+- Added pinned `xrpld` signed-transaction vectors for all five confidential MPT transaction types.
+
+### Changed
+
+#### xrpl/rpc
+
+- Confidential MPT autofill now applies the protocol 10× base-fee multiplier, including multisigning and Batch inner fees.
+
+#### xrpl/websocket
+
+- Confidential MPT autofill now applies the protocol 10× base-fee multiplier, including multisigning and Batch inner fees.
+
 ### Fixed
 
 #### dependencies
 
 - Raised the minimum Go version from 1.25.12 to 1.25.13 to fix the `net/url` quadratic path-resolution vulnerability (GO-2026-6218).
+
+#### xrpl/transaction
+
+- Confidential encryption keys, ciphertexts, and commitments now require valid compressed secp256k1 points. Issuance IDs, amounts, and issuer/holder roles now follow XLS-96 and current `rippled` validation.
 
 ## [v0.3.0]
 
@@ -606,10 +656,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.1.18]
 
 ### Added
-
-#### binary-codec
-
-- Added XLS-96 confidential MPT field and transaction type definitions (`ConfidentialMPTSend`, `ConfidentialMPTConvert`, `ConfidentialMPTConvertBack`, `ConfidentialMPTMergeInbox`, `ConfidentialMPTClawback`).
 
 #### xrpl
 
