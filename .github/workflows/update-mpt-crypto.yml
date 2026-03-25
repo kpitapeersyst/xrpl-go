@@ -46,6 +46,9 @@ jobs:
           if [ "$CURRENT" = "$VERSION" ]; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
             echo "Already at mpt-crypto/$VERSION — skipping build."
+          elif git ls-remote --exit-code --heads origin "chore/update-mpt-crypto-${VERSION}" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Branch 'chore/update-mpt-crypto-${VERSION}' already exists. Delete it before re-running."
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
             echo "Update needed: $CURRENT -> $VERSION"
