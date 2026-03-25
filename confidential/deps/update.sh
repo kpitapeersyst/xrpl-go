@@ -162,7 +162,12 @@ mkdir -p "$LIBS_DIR"
 copy_lib() {
     local name="$1"
     local src
-    src=$(find ~/.conan2/p/ -name "$name" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    # Use stat for sorting by modification time (portable across Linux and macOS).
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        src=$(find ~/.conan2/p/ -name "$name" -type f -exec stat -f '%m %N' {} \; 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    else
+        src=$(find ~/.conan2/p/ -name "$name" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+    fi
     if [ -z "$src" ]; then
         echo "ERROR: $name not found in Conan cache"
         exit 1
