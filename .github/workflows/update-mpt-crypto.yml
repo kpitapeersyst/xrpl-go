@@ -1,0 +1,76 @@
+name: Build mpt-crypto
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "mpt-crypto version (leave empty for latest)"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-latest
+            platform: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conan
+        run: |
+          pip install conan
+          conan profile detect
+          conan remote add --index 0 xrplf https://conan.ripplex.io
+
+      - name: Build libraries
+        run: |
+          bash confidential/deps/update.sh \
+            --platform ${{ matrix.platform }} \
+            --force \
+            ${{ inputs.version && format('--version {0}', inputs.version) || '' }}
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpt-crypto-${{ matrix.platform }}
+          path: confidential/deps/
+
+  bundle:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Merge into single artifact
+        run: |
+          mkdir -p merged/confidential/deps/include
+          # Headers are the same across platforms — take from any
+          cp -r artifacts/mpt-crypto-linux-amd64/include/ merged/confidential/deps/include/
+          cp artifacts/mpt-crypto-linux-amd64/VERSION merged/confidential/deps/
+          # Libs are per-platform
+          for dir in artifacts/mpt-crypto-*/; do
+            platform=$(basename "$dir" | sed 's/mpt-crypto-//')
+            if [ -d "$dir/libs/$platform" ]; then
+              mkdir -p "merged/confidential/deps/libs/$platform"
+              cp "$dir/libs/$platform/"*.a "merged/confidential/deps/libs/$platform/"
+            fi
+          done
+          echo "==> Merged contents:"
+          find merged/ -type f
+
+      - name: Upload merged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpt-crypto-all
+          path: merged/confidential/deps/
