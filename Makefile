@@ -3,8 +3,11 @@
 .PHONY: run-localnet run-localnet-linux/amd64 run-localnet-linux/arm64 stop-localnet integration-localnet
 .PHONY: test-integration-localnet test-integration-devnet test-integration-testnet
 .PHONY: coverage-unit benchmark
+.PHONY: test-confidential test-confidential-nocgo run-confidential-localnet test-integration-confidential-localnet stop-confidential-localnet
 
 UNIT_TEST_PACKAGES = $(shell go list ./... | grep -v /faucet | grep -v /examples | grep -v /testutil | grep -v /interfaces) ./xrpl/testutil/integration/...
+EXCLUDED_TEST_PACKAGES = $(shell go list ./... | grep -v /faucet | grep -v /examples | grep -v /testutil | grep -v /interfaces | grep -v /confidential)
+EXCLUDED_COVERAGE_PACKAGES = $(shell go list ./... | grep -v /faucet | grep -v /examples | grep -v /testutil | grep -v /interfaces | grep -v /confidential)
 
 INTEGRATION_TEST_PACKAGES = ./xrpl/transaction/integration/...
 
@@ -19,6 +22,9 @@ GOLANGCI_LINT_VERSION = v2.11.3
 XRPLD_IMAGE ?= rippleci/xrpld:develop
 XRPLD_CONFIG ?= /etc/xrpld/xrpld.cfg
 LOCALNET_CONTAINER ?= xrpld_standalone
+CONFIDENTIAL_XRPLD_IMAGE ?= rippleci/xrpld@sha256:595a2ed598dad35737e4423538e7cdb2e26b8535d78c255ed9b9dbebeb2e9c4c
+CONFIDENTIAL_XRPLD_COMMIT = 26cc683ec143e8a5fcc6dd09c2c1fe25ac08b94c
+CONFIDENTIAL_LOCALNET_CONTAINER ?= xrpld_confidential_standalone
 
 ################################################################################
 ############################### LINTING ########################################
@@ -115,5 +121,43 @@ coverage-unit:
 
 benchmark:
 	@echo "Running Go benchmarks..."
-	@$(GOTEST) -bench=. ./...
+	@$(GOTEST) -bench=. $(EXCLUDED_TEST_PACKAGES)
 	@echo "Benchmarks complete!"
+
+################################################################################
+######################### CONFIDENTIAL MPT #####################################
+################################################################################
+
+test-confidential:
+	@echo "Running confidential MPT tests (CGo required)..."
+	@CGO_ENABLED=1 go test ./confidential/... ./binary-codec/... ./xrpl/transaction ./xrpl/rpc ./xrpl/websocket ./xrpl/wallet -timeout $(TEST_TIMEOUT)
+	@echo "Confidential tests complete!"
+
+test-confidential-nocgo:
+	@echo "Running confidential MPT fallback tests without CGo..."
+	@CGO_ENABLED=0 go test ./confidential/... ./binary-codec/... ./xrpl/transaction ./xrpl/rpc ./xrpl/websocket ./xrpl/wallet -timeout $(TEST_TIMEOUT)
+	@echo "Confidential fallback tests complete!"
+
+run-confidential-localnet:
+	@docker pull --quiet --platform linux/amd64 "$(CONFIDENTIAL_XRPLD_IMAGE)" >/dev/null
+	@image_commit=$$(docker image inspect --format '{{index .Config.Labels "com.ripple.commit_id"}}' "$(CONFIDENTIAL_XRPLD_IMAGE)"); \
+		test "$$image_commit" = "$(CONFIDENTIAL_XRPLD_COMMIT)" || (echo "image source $$image_commit does not match $(CONFIDENTIAL_XRPLD_COMMIT)"; exit 1)
+	@docker run --rm -d --platform linux/amd64 --name "$(CONFIDENTIAL_LOCALNET_CONTAINER)" \
+		--label org.xrpl-go.confidential.platform=linux/amd64 \
+		-p 5005:5005 -p 6006:6006 \
+		--volume "$(PWD)/.ci-config-confidential:/etc/opt/xrpld:ro" \
+		"$(CONFIDENTIAL_XRPLD_IMAGE)" \
+		--conf /etc/opt/xrpld/rippled.cfg --standalone --start
+
+stop-confidential-localnet:
+	@docker stop "$(CONFIDENTIAL_LOCALNET_CONTAINER)" >/dev/null 2>&1 || true
+
+test-integration-confidential-localnet:
+	@actual_image=$$(docker inspect --format '{{.Config.Image}}' "$(CONFIDENTIAL_LOCALNET_CONTAINER)"); \
+		test "$$actual_image" = "$(CONFIDENTIAL_XRPLD_IMAGE)" || (echo "running image $$actual_image does not match $(CONFIDENTIAL_XRPLD_IMAGE)"; exit 1)
+	@XRPLD_CONFIDENTIAL_IMAGE="$(CONFIDENTIAL_XRPLD_IMAGE)" XRPLD_CONFIDENTIAL_PLATFORM=linux/amd64 \
+		INTEGRATION=localnet CGO_ENABLED=1 $(GOTEST) ./xrpl/transaction/integration \
+		-run '^TestIntegrationConfidentialMPT$$' -count=1 -timeout $(TEST_TIMEOUT) -v
+
+update-mpt-crypto:
+	@bash confidential/deps/update.sh
