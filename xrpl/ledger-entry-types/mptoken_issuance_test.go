@@ -98,18 +98,6 @@ func TestMPTokenIssuance_OmitsAbsentOptionalFields(t *testing.T) {
 	require.NotContains(t, fields, "MPTokenMetadata")
 }
 
-func TestMPTokenIssuance_SetLsmfMPTCannotMutateCanConfidentialAmount(t *testing.T) {
-	mpTokenIssuance := &MPTokenIssuance{}
-	mpTokenIssuance.SetLsmfMPTCannotMutateCanConfidentialAmount()
-	require.Equal(t, LsmfMPTCannotMutateCanConfidentialAmount, mpTokenIssuance.MutableFlags)
-}
-
-func TestMPTokenIssuance_SetLsfMPTCanConfidentialAmount(t *testing.T) {
-	mpTokenIssuance := &MPTokenIssuance{}
-	mpTokenIssuance.SetLsfMPTCanConfidentialAmount()
-	require.Equal(t, LsfMPTCanConfidentialAmount, mpTokenIssuance.Flags)
-}
-
 func TestMPTokenIssuanceSerialization(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -456,18 +444,18 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 }`,
 		},
 		{
-			name: "pass - valid MPTokenIssuance with LsfMPTCanConfidentialAmount",
+			name: "pass - valid MPTokenIssuance with LsfMPTCanHoldConfidentialBalance",
 			mpTokenIssuance: &MPTokenIssuance{
 				Index:             types.Hash256("A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"),
 				LedgerEntryType:   MPTokenIssuanceEntry,
-				Flags:             LsfMPTCanConfidentialAmount,
+				Flags:             LsfMPTCanHoldConfidentialBalance,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -478,11 +466,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 128,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -493,20 +481,20 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 			mpTokenIssuance: &MPTokenIssuance{
 				Index:                         types.Hash256("A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"),
 				LedgerEntryType:               MPTokenIssuanceEntry,
-				Flags:                         LsfMPTCanConfidentialAmount | LsfMPTCanTransfer,
+				Flags:                         LsfMPTCanHoldConfidentialBalance | LsfMPTCanTransfer,
 				Issuer:                        types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:                    2,
-				MaximumAmount:                 1000,
-				OutstandingAmount:             100,
+				MaximumAmount:                 "1000",
+				OutstandingAmount:             "100",
 				TransferFee:                   100,
 				MPTokenMetadata:               "7B227469636B6572",
-				OwnerNode:                     1,
+				OwnerNode:                     "1",
 				PreviousTxnID:                 types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq:             234644,
 				Sequence:                      1,
 				IssuerEncryptionKey:           "AABBCCDD",
 				AuditorEncryptionKey:          "EEFF0011",
-				ConfidentialOutstandingAmount: 500,
+				ConfidentialOutstandingAmount: "500",
 			},
 			expected: `{
 	"index": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
@@ -514,17 +502,17 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 160,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1,
 	"IssuerEncryptionKey": "AABBCCDD",
 	"AuditorEncryptionKey": "EEFF0011",
-	"ConfidentialOutstandingAmount": 500
+	"ConfidentialOutstandingAmount": "500"
 }`,
 		},
 	}
