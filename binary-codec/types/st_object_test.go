@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -74,6 +75,172 @@ func TestStObject_FromJson(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, tc.output, got)
 			}
+		})
+	}
+}
+
+func TestStObject_FromJSONWithRawFieldValueOverrides(t *testing.T) {
+	input := map[string]any{
+		"Account":         "rrrrrrrrrrrrrrrrrrrrrhoLvTp",
+		"Sequence":        uint32(0),
+		"TransactionType": "UNLModify",
+	}
+
+	t.Run("generic path serializes the Account value", func(t *testing.T) {
+		serializer := serdes.NewBinarySerializer(serdes.NewFieldIDCodec(definitions.Get()))
+		stObject := NewSTObject(serializer)
+
+		got, err := stObject.FromJSON(input)
+		require.NoError(t, err)
+		require.Equal(t, []byte{
+			0x12, 0x00, 0x66,
+			0x24, 0x00, 0x00, 0x00, 0x00,
+			0x81, 0x14,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		}, got)
+	})
+
+	t.Run("raw override replaces only the Account value", func(t *testing.T) {
+		serializer := serdes.NewBinarySerializer(serdes.NewFieldIDCodec(definitions.Get()))
+		stObject := NewSTObject(serializer)
+
+		got, err := stObject.FromJSONWithRawFieldValueOverrides(
+			input,
+			RawFieldValueOverrides{"Account": []byte{}},
+		)
+		require.NoError(t, err)
+		require.Equal(t, []byte{
+			0x12, 0x00, 0x66,
+			0x24, 0x00, 0x00, 0x00, 0x00,
+			0x81, 0x00,
+		}, got)
+	})
+}
+
+func TestCreateFieldInstanceMapFromJsonXAddressZeroTag(t *testing.T) {
+	got, err := createFieldInstanceMapFromJson(map[string]any{
+		"Destination": "XV5sbjUmgPpvXv4ixFWZ5ptAYZ6PD2m4Er6SnvjVLpMWPjR",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY", got[testutil.GetFieldInstance(t, "Destination")])
+	require.Equal(t, uint32(0), got[testutil.GetFieldInstance(t, "DestinationTag")])
+}
+
+func TestCreateFieldInstanceMapFromJsonXAddressDuplicateZeroTag(t *testing.T) {
+	testcases := []struct {
+		name string
+		tag  any
+	}{
+		{
+			name: "int",
+			tag:  0,
+		},
+		{
+			name: "uint32",
+			tag:  uint32(0),
+		},
+		{
+			name: "float64",
+			tag:  float64(0),
+		},
+		{
+			name: "json number",
+			tag:  json.Number("0"),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := createFieldInstanceMapFromJson(map[string]any{
+				"Destination":    "XV5sbjUmgPpvXv4ixFWZ5ptAYZ6PD2m4Er6SnvjVLpMWPjR",
+				"DestinationTag": tc.tag,
+			})
+			require.ErrorIs(t, err, ErrDuplicateXAddressTag)
+		})
+	}
+}
+
+func TestCreateFieldInstanceMapFromJsonXAddressNonZeroTag(t *testing.T) {
+	t.Run("Destination populates DestinationTag", func(t *testing.T) {
+		got, err := createFieldInstanceMapFromJson(map[string]any{
+			"Destination": "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59", got[testutil.GetFieldInstance(t, "Destination")])
+		require.Equal(t, uint32(22), got[testutil.GetFieldInstance(t, "DestinationTag")])
+	})
+
+	t.Run("Account populates SourceTag", func(t *testing.T) {
+		got, err := createFieldInstanceMapFromJson(map[string]any{
+			"Account": "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59", got[testutil.GetFieldInstance(t, "Account")])
+		require.Equal(t, uint32(22), got[testutil.GetFieldInstance(t, "SourceTag")])
+	})
+}
+
+func TestCreateFieldInstanceMapFromJsonXAddressTagNotAllowed(t *testing.T) {
+	testcases := []struct {
+		name      string
+		fieldName string
+		xAddress  string
+	}{
+		{
+			name:      "Issuer rejects tagged X-address",
+			fieldName: "Issuer",
+			xAddress:  "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn", // tag 22
+		},
+		{
+			name:      "RegularKey rejects tagged X-address",
+			fieldName: "RegularKey",
+			xAddress:  "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn", // tag 22
+		},
+		{
+			name:      "Owner rejects tagged X-address",
+			fieldName: "Owner",
+			xAddress:  "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn", // tag 22
+		},
+		{
+			name:      "Issuer rejects zero-tag X-address",
+			fieldName: "Issuer",
+			xAddress:  "XV5sbjUmgPpvXv4ixFWZ5ptAYZ6PD2m4Er6SnvjVLpMWPjR", // tag 0
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := createFieldInstanceMapFromJson(map[string]any{
+				tc.fieldName: tc.xAddress,
+			})
+			require.ErrorIs(t, err, ErrAccountIDTagNotAllowed)
+		})
+	}
+}
+
+func TestCreateFieldInstanceMapFromJsonXAddressDuplicateNonZeroTag(t *testing.T) {
+	testcases := []struct {
+		name string
+		tag  uint32
+	}{
+		{
+			name: "matching tag",
+			tag:  22,
+		},
+		{
+			name: "mismatching tag",
+			tag:  99,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := createFieldInstanceMapFromJson(map[string]any{
+				"Destination":    "X7AcgcsBL6XDcUb289X4mJ8djcdyKaGxLBw6rACm2heBxVn",
+				"DestinationTag": tc.tag,
+			})
+			require.ErrorIs(t, err, ErrDuplicateXAddressTag)
 		})
 	}
 }

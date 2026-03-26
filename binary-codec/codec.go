@@ -4,7 +4,7 @@ package binarycodec
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"math"
 	"strings"
 
@@ -13,25 +13,7 @@ import (
 	"github.com/Peersyst/xrpl-go/binary-codec/serdes"
 	"github.com/Peersyst/xrpl-go/binary-codec/types"
 	"github.com/Peersyst/xrpl-go/pkg/hexutil"
-)
-
-var (
-	// Static errors
-
-	// ErrSigningClaimFieldNotFound is returned when the 'Channel' & 'Amount' fields are both required, but were not found.
-	ErrSigningClaimFieldNotFound = errors.New("'Channel' & 'Amount' fields are both required, but were not found")
-	// ErrBatchFlagsFieldNotFound is returned when the 'flags' field is missing.
-	ErrBatchFlagsFieldNotFound = errors.New("no field `flags`")
-	// ErrBatchTxIDsFieldNotFound is returned when the 'txIDs' field is missing.
-	ErrBatchTxIDsFieldNotFound = errors.New("no field `txIDs`")
-	// ErrBatchTxIDsNotArray is returned when the 'txIDs' field is not an array.
-	ErrBatchTxIDsNotArray = errors.New("txIDs field must be an array")
-	// ErrBatchTxIDNotString is returned when a txID is not a string.
-	ErrBatchTxIDNotString = errors.New("each txID must be a string")
-	// ErrBatchFlagsNotUInt32 is returned when the 'flags' field is not a uint32.
-	ErrBatchFlagsNotUInt32 = errors.New("flags field must be a uint32")
-	// ErrBatchTxIDsLengthTooLong is returned when the 'txIDs' field is too long.
-	ErrBatchTxIDsLengthTooLong = errors.New("txIDs length exceeds maximum uint32 value")
+	"github.com/Peersyst/xrpl-go/pkg/typecheck"
 )
 
 const (
@@ -39,6 +21,8 @@ const (
 	paymentChannelClaimPrefix = "434C4D00"
 	txSigPrefix               = "53545800"
 	batchPrefix               = "42434800"
+	unlModifyTransactionType  = "UNLModify"
+	xrplZeroAccount           = "rrrrrrrrrrrrrrrrrrrrrhoLvTp"
 )
 
 // Encode converts a JSON transaction object to a hex string in the canonical binary format.
@@ -46,26 +30,50 @@ const (
 func Encode(json map[string]any) (string, error) {
 	st := types.NewSTObject(serdes.NewBinarySerializer(serdes.NewFieldIDCodec(definitions.Get())))
 
-	// Iterate over the keys in the provided JSON
-	for k := range json {
-
-		// Get the FieldIdNameMap from the definitions package
-		fh := definitions.Get().Fields[k]
-
-		// If the field is not found in the FieldIdNameMap, delete it from the JSON
-
-		if fh == nil {
-			delete(json, k)
-			continue
+	filteredJSON := make(map[string]any, len(json))
+	for k, v := range json {
+		if definitions.Get().Fields[k] != nil {
+			filteredJSON[k] = v
 		}
 	}
 
-	b, err := st.FromJSON(json)
+	overrides, err := transactionRawFieldValueOverrides(filteredJSON)
+	if err != nil {
+		return "", err
+	}
+	if overrides != nil {
+		// UInt16 expects a built-in string. Normalize only the private copy used for encoding.
+		filteredJSON["TransactionType"] = unlModifyTransactionType
+	}
+
+	b, err := st.FromJSONWithRawFieldValueOverrides(filteredJSON, overrides)
 	if err != nil {
 		return "", err
 	}
 
 	return hexutil.EncodeToUpperHex(b), nil
+}
+
+func transactionRawFieldValueOverrides(json map[string]any) (types.RawFieldValueOverrides, error) {
+	transactionType, ok := typecheck.ToString(json["TransactionType"])
+	if !ok || transactionType != unlModifyTransactionType {
+		return nil, nil
+	}
+
+	if accountValue, present := json["Account"]; present {
+		account, isString := typecheck.ToString(accountValue)
+		if !isString {
+			return nil, fmt.Errorf("%w; got %T", ErrInvalidUNLModifyAccount, accountValue)
+		}
+		if account != "" && account != xrplZeroAccount {
+			return nil, fmt.Errorf("%w; got %q", ErrInvalidUNLModifyAccount, account)
+		}
+	}
+
+	// rippled represents the Account of a consensus-generated UNLModify transaction as a
+	// default STAccount. STAccount::add serializes that default as a zero-length value:
+	// https://github.com/XRPLF/rippled/blob/d4c1359921f34a4e96c5c8483119e59f0e30e4df/src/libxrpl/protocol/STAccount.cpp#L71-L81
+	return types.RawFieldValueOverrides{"Account": []byte{}}, nil
 }
 
 // EncodeForMultisigning encodes a transaction into binary format in preparation for providing one
@@ -82,7 +90,7 @@ func EncodeForMultisigning(json map[string]any, xrpAccountID string) (string, er
 		return "", err
 	}
 
-	encoded, err := Encode(removeNonSigningFields(json))
+	encoded, err := Encode(signingFieldsOnly(json))
 	if err != nil {
 		return "", err
 	}
@@ -92,12 +100,25 @@ func EncodeForMultisigning(json map[string]any, xrpAccountID string) (string, er
 
 // EncodeForSigning encodes a transaction into binary format in preparation for signing.
 func EncodeForSigning(json map[string]any) (string, error) {
-	encoded, err := Encode(removeNonSigningFields(json))
+	encoded, err := Encode(signingFieldsOnly(json))
 	if err != nil {
 		return "", err
 	}
 
 	return strings.ToUpper(txSigPrefix + encoded), nil
+}
+
+// signingFieldsOnly returns a new map containing only the fields from the JSON transaction that are signing fields.
+func signingFieldsOnly(json map[string]any) map[string]any {
+	signingFields := make(map[string]any, len(json))
+	for k, v := range json {
+		fi, _ := definitions.Get().GetFieldInstanceByFieldName(k)
+		if fi != nil && fi.IsSigningField {
+			signingFields[k] = v
+		}
+	}
+
+	return signingFields
 }
 
 // EncodeForSigningClaim encodes a payment channel claim into binary format in preparation for signing.
@@ -124,8 +145,14 @@ func EncodeForSigningClaim(json map[string]any) (string, error) {
 	return strings.ToUpper(paymentChannelClaimPrefix + hex.EncodeToString(channel) + hex.EncodeToString(amount)), nil
 }
 
-// EncodeForSigningBatch encodes a batch transaction into binary format in preparation for signing.
+// EncodeForSigningBatch encodes a BatchV1_1 transaction payload in preparation for signing.
 func EncodeForSigningBatch(json map[string]any) (string, error) {
+	if json["account"] == nil {
+		return "", ErrBatchAccountFieldNotFound
+	}
+	if json["sequence"] == nil {
+		return "", ErrBatchSequenceFieldNotFound
+	}
 	if json["flags"] == nil {
 		return "", ErrBatchFlagsFieldNotFound
 	}
@@ -133,64 +160,77 @@ func EncodeForSigningBatch(json map[string]any) (string, error) {
 		return "", ErrBatchTxIDsFieldNotFound
 	}
 
-	// Extract and validate txIDs
-	txIDsInterface, ok := json["txIDs"].([]string)
+	batchAccount, hasBatchAccount := json["batchAccount"]
+	signerAccount, hasSignerAccount := json["signerAccount"]
+	if hasSignerAccount && !hasBatchAccount {
+		return "", ErrBatchSignerAccountWithoutBatchAccount
+	}
+
+	txIDs, ok := json["txIDs"].([]string)
 	if !ok {
 		return "", ErrBatchTxIDsNotArray
 	}
-
-	// Validate flags type
-	_, ok = json["flags"].(uint32)
-	if !ok {
+	if _, ok = json["flags"].(uint32); !ok {
 		return "", ErrBatchFlagsNotUInt32
 	}
 
-	// Create UInt32 for flags
-	flagsType := &types.UInt32{}
-	flagsBytes, err := flagsType.FromJSON(json["flags"])
-	if err != nil {
-		return "", err
-	}
-
-	// Create UInt32 for txIDs length
-	txIDsLengthType := &types.UInt32{}
-	txIDsLength := len(txIDsInterface)
+	txIDsLength := len(txIDs)
 	if txIDsLength > math.MaxUint32 {
 		return "", ErrBatchTxIDsLengthTooLong
 	}
-	txIDsLengthBytes, err := txIDsLengthType.FromJSON(uint32(txIDsLength))
-	if err != nil {
-		return "", err
-	}
 
-	// Build the result string
 	var result strings.Builder
-	result.WriteString(batchPrefix + hex.EncodeToString(flagsBytes) + hex.EncodeToString(txIDsLengthBytes))
+	result.WriteString(batchPrefix)
 
-	// Add each transaction ID
-	for _, txID := range txIDsInterface {
-		hash256 := types.NewHash256()
-		txIDBytes, err := hash256.FromJSON(txID)
+	accountBytes, err := (&types.AccountID{}).FromJSON(json["account"])
+	if err != nil {
+		return "", fmt.Errorf("encode BatchV1_1 account: %w", err)
+	}
+	result.WriteString(hex.EncodeToString(accountBytes))
+
+	sequenceBytes, err := (&types.UInt32{}).FromJSON(json["sequence"])
+	if err != nil {
+		return "", fmt.Errorf("encode BatchV1_1 sequence: %w", err)
+	}
+	result.WriteString(hex.EncodeToString(sequenceBytes))
+
+	flagsBytes, err := (&types.UInt32{}).FromJSON(json["flags"])
+	if err != nil {
+		return "", fmt.Errorf("encode BatchV1_1 flags: %w", err)
+	}
+	result.WriteString(hex.EncodeToString(flagsBytes))
+
+	txIDsLengthBytes, err := (&types.UInt32{}).FromJSON(uint32(txIDsLength))
+	if err != nil {
+		return "", fmt.Errorf("encode BatchV1_1 txIDs length: %w", err)
+	}
+	result.WriteString(hex.EncodeToString(txIDsLengthBytes))
+
+	for i, txID := range txIDs {
+		txIDBytes, err := types.NewHash256().FromJSON(txID)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("encode BatchV1_1 txIDs[%d]: %w", i, err)
 		}
 		result.WriteString(hex.EncodeToString(txIDBytes))
 	}
 
-	return strings.ToUpper(result.String()), nil
-}
-
-// removeNonSigningFields removes the fields from a JSON transaction object that should not be signed.
-func removeNonSigningFields(json map[string]any) map[string]any {
-	for k := range json {
-		fi, _ := definitions.Get().GetFieldInstanceByFieldName(k)
-
-		if fi != nil && !fi.IsSigningField {
-			delete(json, k)
+	if hasBatchAccount {
+		batchAccountBytes, err := (&types.AccountID{}).FromJSON(batchAccount)
+		if err != nil {
+			return "", fmt.Errorf("encode BatchV1_1 batchAccount: %w", err)
 		}
+		result.WriteString(hex.EncodeToString(batchAccountBytes))
 	}
 
-	return json
+	if hasSignerAccount {
+		signerAccountBytes, err := (&types.AccountID{}).FromJSON(signerAccount)
+		if err != nil {
+			return "", fmt.Errorf("encode BatchV1_1 signerAccount: %w", err)
+		}
+		result.WriteString(hex.EncodeToString(signerAccountBytes))
+	}
+
+	return strings.ToUpper(result.String()), nil
 }
 
 // Decode decodes a hex string in the canonical binary format into a JSON transaction object.

@@ -20,27 +20,41 @@ const (
 	TfMPTCanTransfer uint32 = 0x00000020
 	// TfMPTCanClawback if set, indicates that the issuer may use the Clawback transaction to claw back value from individual holders.
 	TfMPTCanClawback uint32 = 0x00000040
+	// TfMPTCanHoldConfidentialBalance if set, indicates that holders can hold confidential balances.
+	TfMPTCanHoldConfidentialBalance uint32 = 0x00000080
 )
 
-// MutableFlags constants for MPTokenIssuanceCreate.
-// These declare which properties can be mutated after creation.
+// ImmutableFlags constants for MPTokenIssuanceCreate and MPTokenIssuanceSet.
+// A set bit permanently prevents the related capability from being enabled or the related field from being changed.
 const (
-	// TmfMPTCanMutateCanLock allows the CanLock property to be changed after creation.
-	TmfMPTCanMutateCanLock uint32 = 0x00000002
-	// TmfMPTCanMutateRequireAuth allows the RequireAuth property to be changed after creation.
-	TmfMPTCanMutateRequireAuth uint32 = 0x00000004
-	// TmfMPTCanMutateCanEscrow allows the CanEscrow property to be changed after creation.
-	TmfMPTCanMutateCanEscrow uint32 = 0x00000008
-	// TmfMPTCanMutateCanTrade allows the CanTrade property to be changed after creation.
-	TmfMPTCanMutateCanTrade uint32 = 0x00000010
-	// TmfMPTCanMutateCanTransfer allows the CanTransfer property to be changed after creation.
-	TmfMPTCanMutateCanTransfer uint32 = 0x00000020
-	// TmfMPTCanMutateCanClawback allows the CanClawback property to be changed after creation.
-	TmfMPTCanMutateCanClawback uint32 = 0x00000040
-	// TmfMPTCanMutateMetadata allows the MPTokenMetadata to be changed after creation.
-	TmfMPTCanMutateMetadata uint32 = 0x00010000
-	// TmfMPTCanMutateTransferFee allows the TransferFee to be changed after creation.
-	TmfMPTCanMutateTransferFee uint32 = 0x00020000
+	// TifMPTCanLock makes the CanLock capability immutable.
+	TifMPTCanLock uint32 = 0x00000002
+	// TifMPTRequireAuth makes the RequireAuth capability immutable.
+	TifMPTRequireAuth uint32 = 0x00000004
+	// TifMPTCanEscrow makes the CanEscrow capability immutable.
+	TifMPTCanEscrow uint32 = 0x00000008
+	// TifMPTCanTrade makes the CanTrade capability immutable.
+	TifMPTCanTrade uint32 = 0x00000010
+	// TifMPTCanTransfer makes the CanTransfer capability immutable.
+	TifMPTCanTransfer uint32 = 0x00000020
+	// TifMPTCanClawback makes the CanClawback capability immutable.
+	TifMPTCanClawback uint32 = 0x00000040
+	// TifMPTCanHoldConfidentialBalance makes the confidential balance capability immutable.
+	TifMPTCanHoldConfidentialBalance uint32 = 0x00000080
+	// TifMPTMetadata makes MPTokenMetadata immutable.
+	TifMPTMetadata uint32 = 0x00010000
+	// TifMPTTransferFee makes TransferFee immutable.
+	TifMPTTransferFee uint32 = 0x00020000
+
+	validMPTokenIssuanceImmutableFlags = TifMPTCanLock |
+		TifMPTRequireAuth |
+		TifMPTCanEscrow |
+		TifMPTCanTrade |
+		TifMPTCanTransfer |
+		TifMPTCanClawback |
+		TifMPTCanHoldConfidentialBalance |
+		TifMPTMetadata |
+		TifMPTTransferFee
 )
 
 // MPTokenIssuanceCreateMetadata represents the resulting metadata of a succeeded MPTokenIssuanceCreate transaction.
@@ -82,23 +96,18 @@ type MPTokenIssuanceCreate struct {
 	// allowing transfer rates of between 0.000% and 50.000% in increments of 0.001.
 	// The field must NOT be present if the `TfMPTCanTransfer` flag is not set.
 	TransferFee *uint16 `json:",omitempty"`
-	// Specifies the maximum asset amount of this token that should ever be issued.
-	// It is a non-negative integer string that can store a range of up to 63 bits. If not set, the max
-	// amount will default to the largest unsigned 63-bit integer (0x7FFFFFFFFFFFFFFF or 9223372036854775807)
-	//
-	// Example:
-	// ```
-	// MaximumAmount: '9223372036854775807'
-	// ```
-	MaximumAmount *types.XRPCurrencyAmount `json:",omitempty"`
+	// Specifies the maximum number of MPT units that may be issued.
+	// When present, the value must be between 1 and 2^63-1. If omitted, the
+	// protocol currently defaults to 2^63-1.
+	MaximumAmount *types.MPTAmount `json:",omitempty"`
 	// MPTokenMetadata is arbitrary metadata about this issuance in hex format.
 	// The limit for this field is 1024 bytes.
 	MPTokenMetadata *string `json:",omitempty"`
 	// DomainID is the ledger entry ID of a permissioned domain that grants access to the MPT.
 	// Requires the TfMPTRequireAuth flag to be set.
 	DomainID *string `json:",omitempty"`
-	// MutableFlags declares which properties of this MPT can be mutated after creation.
-	MutableFlags *uint32 `json:",omitempty"`
+	// ImmutableFlags identifies capabilities and fields that can no longer change after creation.
+	ImmutableFlags *uint32 `json:",omitempty"`
 }
 
 // TxType returns the type of the transaction (MPTokenIssuanceCreate).
@@ -132,8 +141,8 @@ func (m *MPTokenIssuanceCreate) Flatten() FlatTransaction {
 		flattened["DomainID"] = *m.DomainID
 	}
 
-	if m.MutableFlags != nil {
-		flattened["MutableFlags"] = *m.MutableFlags
+	if m.ImmutableFlags != nil {
+		flattened["ImmutableFlags"] = *m.ImmutableFlags
 	}
 
 	return flattened
@@ -169,53 +178,61 @@ func (m *MPTokenIssuanceCreate) SetMPTCanClawbackFlag() {
 	m.Flags |= TfMPTCanClawback
 }
 
-// setMutableFlag is a helper that initialises MutableFlags if nil and applies the given flag.
-func (m *MPTokenIssuanceCreate) setMutableFlag(f uint32) {
-	if m.MutableFlags == nil {
-		mf := uint32(0)
-		m.MutableFlags = &mf
+// SetMPTCanHoldConfidentialBalanceFlag sets the confidential balance capability.
+func (m *MPTokenIssuanceCreate) SetMPTCanHoldConfidentialBalanceFlag() {
+	m.Flags |= TfMPTCanHoldConfidentialBalance
+}
+
+func (m *MPTokenIssuanceCreate) setImmutableFlag(f uint32) {
+	if m.ImmutableFlags == nil {
+		m.ImmutableFlags = new(uint32)
 	}
-	*m.MutableFlags |= f
+	*m.ImmutableFlags |= f
 }
 
-// SetMPTCanMutateCanLockFlag allows the CanLock property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateCanLockFlag() {
-	m.setMutableFlag(TmfMPTCanMutateCanLock)
+// SetMPTCanLockImmutableFlag makes the CanLock capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanLockImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanLock)
 }
 
-// SetMPTCanMutateRequireAuthFlag allows the RequireAuth property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateRequireAuthFlag() {
-	m.setMutableFlag(TmfMPTCanMutateRequireAuth)
+// SetMPTRequireAuthImmutableFlag makes the RequireAuth capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTRequireAuthImmutableFlag() {
+	m.setImmutableFlag(TifMPTRequireAuth)
 }
 
-// SetMPTCanMutateCanEscrowFlag allows the CanEscrow property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateCanEscrowFlag() {
-	m.setMutableFlag(TmfMPTCanMutateCanEscrow)
+// SetMPTCanEscrowImmutableFlag makes the CanEscrow capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanEscrowImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanEscrow)
 }
 
-// SetMPTCanMutateCanTradeFlag allows the CanTrade property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateCanTradeFlag() {
-	m.setMutableFlag(TmfMPTCanMutateCanTrade)
+// SetMPTCanTradeImmutableFlag makes the CanTrade capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanTradeImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanTrade)
 }
 
-// SetMPTCanMutateCanTransferFlag allows the CanTransfer property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateCanTransferFlag() {
-	m.setMutableFlag(TmfMPTCanMutateCanTransfer)
+// SetMPTCanTransferImmutableFlag makes the CanTransfer capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanTransferImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanTransfer)
 }
 
-// SetMPTCanMutateCanClawbackFlag allows the CanClawback property to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateCanClawbackFlag() {
-	m.setMutableFlag(TmfMPTCanMutateCanClawback)
+// SetMPTCanClawbackImmutableFlag makes the CanClawback capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanClawbackImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanClawback)
 }
 
-// SetMPTCanMutateMetadataFlag allows the MPTokenMetadata to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateMetadataFlag() {
-	m.setMutableFlag(TmfMPTCanMutateMetadata)
+// SetMPTCanHoldConfidentialBalanceImmutableFlag makes the confidential balance capability immutable.
+func (m *MPTokenIssuanceCreate) SetMPTCanHoldConfidentialBalanceImmutableFlag() {
+	m.setImmutableFlag(TifMPTCanHoldConfidentialBalance)
 }
 
-// SetMPTCanMutateTransferFeeFlag allows the TransferFee to be changed after creation.
-func (m *MPTokenIssuanceCreate) SetMPTCanMutateTransferFeeFlag() {
-	m.setMutableFlag(TmfMPTCanMutateTransferFee)
+// SetMPTMetadataImmutableFlag makes MPTokenMetadata immutable.
+func (m *MPTokenIssuanceCreate) SetMPTMetadataImmutableFlag() {
+	m.setImmutableFlag(TifMPTMetadata)
+}
+
+// SetMPTTransferFeeImmutableFlag makes TransferFee immutable.
+func (m *MPTokenIssuanceCreate) SetMPTTransferFeeImmutableFlag() {
+	m.setImmutableFlag(TifMPTTransferFee)
 }
 
 // Validate validates the MPTokenIssuanceCreate transaction ensuring all fields are correct.
@@ -233,16 +250,16 @@ func (m *MPTokenIssuanceCreate) Validate() (bool, error) {
 		if !flag.Contains(m.Flags, TfMPTCanTransfer) {
 			return false, ErrTransferFeeRequiresCanTransfer
 		}
-	}
-
-	if m.MaximumAmount != nil {
-		if ok, err := IsAmount(*m.MaximumAmount, "MaximumAmount", true); !ok {
-			return false, err
+		if flag.Contains(m.Flags, TfMPTCanHoldConfidentialBalance) {
+			return false, ErrMPTIssuanceCreateTransferFeeWithConfidentialBalance
 		}
 	}
 
+	if m.MaximumAmount != nil && (m.MaximumAmount.IsZero() || !m.MaximumAmount.IsValid()) {
+		return false, ErrMPTIssuanceCreateMaximumAmountInvalid
+	}
+
 	// Validate MPTokenMetadata: ensure it's in hex format and at most 1024 bytes (2048 chars).
-	// This assumes m.MPTokenMetadata.String() returns its hex representation.
 	if m.MPTokenMetadata != nil && !ValidateHexMetadata(*m.MPTokenMetadata, 2*types.MaxMPTokenMetadataByteLength) {
 		return false, ErrInvalidMPTokenMetadata
 	}
@@ -257,9 +274,13 @@ func (m *MPTokenIssuanceCreate) Validate() (bool, error) {
 		}
 	}
 
-	// MutableFlags cannot be zero when present.
-	if m.MutableFlags != nil && *m.MutableFlags == 0 {
-		return false, ErrMPTIssuanceCreateMutableFlagsZero
+	if m.ImmutableFlags != nil {
+		if *m.ImmutableFlags == 0 {
+			return false, ErrMPTIssuanceCreateImmutableFlagsZero
+		}
+		if *m.ImmutableFlags&^uint32(validMPTokenIssuanceImmutableFlags) != 0 {
+			return false, ErrMPTIssuanceCreateInvalidImmutableFlags
+		}
 	}
 
 	return true, nil

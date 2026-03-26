@@ -20,8 +20,20 @@ func TestUint64_FromJson(t *testing.T) {
 		expectedErr error
 	}{
 		{
-			name:        "fail - value is not a string",
+			name:        "fail - value is not a string (int)",
 			input:       1,
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - value is not a string (nil)",
+			input:       nil,
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - value is not a string (bool)",
+			input:       true,
 			expected:    nil,
 			expectedErr: ErrInvalidUInt64String,
 		},
@@ -29,28 +41,64 @@ func TestUint64_FromJson(t *testing.T) {
 			name:        "fail - invalid hex string",
 			input:       "invalid",
 			expected:    nil,
-			expectedErr: errors.New("encoding/hex: invalid byte: U+0049 'I'"),
+			expectedErr: ErrInvalidUInt64String,
 		},
 		{
-			name:        "pass - valid uint64 numeric string",
+			name:        "fail - empty hex string",
+			input:       "",
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - 17-character hex string",
+			input:       "00000000000000000",
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - smallest value above max uint64 (1 followed by 16 zeros)",
+			input:       "10000000000000000",
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - 1 followed by 16 Fs",
+			input:       "1FFFFFFFFFFFFFFFF",
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "fail - decimal max uint64 exceeds hex string length",
+			input:       "18446744073709551615",
+			expected:    nil,
+			expectedErr: ErrInvalidUInt64String,
+		},
+		{
+			name:        "pass - valid uint64 hex string",
 			input:       "1",
 			expected:    []byte{0, 0, 0, 0, 0, 0, 0, 1},
 			expectedErr: nil,
 		},
 		{
-			name:        "pass - valid uint64 numeric string (2)",
+			name:        "pass - valid uint64 hex string (2)",
 			input:       "100",
 			expected:    []byte{0, 0, 0, 0, 0, 0, 1, 0},
 			expectedErr: nil,
 		},
 		{
-			name:        "pass - valid uint64 numeric string (3)",
-			input:       "255",
-			expected:    []byte{0, 0, 0, 0, 0, 0, 2, 85},
+			name:        "pass - numeric-looking string is treated as hex",
+			input:       "1000",
+			expected:    []byte{0, 0, 0, 0, 0, 0, 16, 0},
 			expectedErr: nil,
 		},
 		{
-			name:        "pass - valid uint64 non-numeric string (large number)",
+			name:        "pass - valid lowercase uint64 hex string",
+			input:       "abcdef",
+			expected:    []byte{0, 0, 0, 0, 0, 171, 205, 239},
+			expectedErr: nil,
+		},
+		{
+			name:        "pass - valid uint64 hex string (large number)",
 			input:       "FFFFFFFFFFFFFFFF",
 			expected:    []byte{255, 255, 255, 255, 255, 255, 255, 255},
 			expectedErr: nil,
@@ -68,6 +116,40 @@ func TestUint64_FromJson(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUInt64_DecimalJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		expected  []byte
+		shouldErr bool
+	}{
+		{name: "zero", input: "0", expected: []byte{0, 0, 0, 0, 0, 0, 0, 0}},
+		{name: "ten thousand", input: "10000", expected: []byte{0, 0, 0, 0, 0, 0, 0x27, 0x10}},
+		{name: "max uint64", input: "18446744073709551615", expected: []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}},
+		{name: "overflow", input: "18446744073709551616", shouldErr: true},
+		{name: "hex prefix", input: "0x10", shouldErr: true},
+		{name: "negative", input: "-1", shouldErr: true},
+		{name: "empty", input: "", shouldErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual, err := (&UInt64{}).fromJSON(tt.input, uint64JSONBaseDecimal)
+			if tt.shouldErr {
+				require.ErrorIs(t, err, ErrInvalidUInt64String)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, actual)
+		})
+	}
+
+	parser := serdes.NewBinaryParser([]byte{0, 0, 0, 0, 0, 0, 0x27, 0x10}, definitions.Get())
+	actual, err := (&UInt64{}).ToJSON(parser, uint64JSONBaseDecimal)
+	require.NoError(t, err)
+	require.Equal(t, "10000", actual)
 }
 
 func TestUint64_ToJson(t *testing.T) {
@@ -139,6 +221,49 @@ func TestUint64_ToJson(t *testing.T) {
 			} else {
 				require.Equal(t, tc.expected, actual)
 			}
+		})
+	}
+}
+
+func TestUint64_RoundTrip(t *testing.T) {
+	defs := definitions.Get()
+
+	tt := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "lowercase short hex is zero-padded and upper-cased",
+			input: "abcdef",
+			want:  "0000000000ABCDEF",
+		},
+		{
+			name:  "single digit is zero-padded",
+			input: "1",
+			want:  "0000000000000001",
+		},
+		{
+			name:  "max value is preserved",
+			input: "FFFFFFFFFFFFFFFF",
+			want:  "FFFFFFFFFFFFFFFF",
+		},
+		{
+			name:  "mixed case is normalized to upper",
+			input: "AbCdEf",
+			want:  "0000000000ABCDEF",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			class := &UInt64{}
+			encoded, err := class.FromJSON(tc.input)
+			require.NoError(t, err)
+
+			decoded, err := class.ToJSON(serdes.NewBinaryParser(encoded, defs))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, decoded)
 		})
 	}
 }

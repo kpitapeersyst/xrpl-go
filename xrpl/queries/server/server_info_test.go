@@ -1,13 +1,150 @@
 package server
 
 import (
+	"encoding/json"
 	"testing"
 
 	servertypes "github.com/Peersyst/xrpl-go/xrpl/queries/server/types"
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/stretchr/testify/require"
 )
 
+func TestServerInfoNetworkIDPresence(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		expected uint32
+		present  bool
+	}{
+		{name: "missing", response: `{"info":{"build_version":"1.10.0"}}`},
+		{name: "explicit zero", response: `{"info":{"network_id":0,"build_version":"1.12.0"}}`, present: true},
+		{name: "restricted", response: `{"info":{"network_id":21337,"build_version":"1.12.0"}}`, expected: 21337, present: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response InfoResponse
+			require.NoError(t, json.Unmarshal([]byte(tt.response), &response))
+			if !tt.present {
+				require.Nil(t, response.Info.NetworkID)
+				return
+			}
+			require.NotNil(t, response.Info.NetworkID)
+			require.Equal(t, tt.expected, *response.Info.NetworkID)
+		})
+	}
+}
+
+func TestServerInfoVersionParsing(t *testing.T) {
+	tests := []struct {
+		name                   string
+		response               string
+		expectedBuildVersion   string
+		expectedRippledVersion string
+		expectedServerVersion  string
+	}{
+		{
+			name:                  "rippled build version",
+			response:              `{"info":{"build_version":"2.5.0","network_id":0}}`,
+			expectedBuildVersion:  "2.5.0",
+			expectedServerVersion: "2.5.0",
+		},
+		{
+			name:                   "Clio rippled version fallback",
+			response:               `{"info":{"rippled_version":"2.4.0","network_id":1}}`,
+			expectedRippledVersion: "2.4.0",
+			expectedServerVersion:  "2.4.0",
+		},
+		{
+			name:                   "build version preferred",
+			response:               `{"info":{"build_version":"2.5.0","rippled_version":"2.4.0","network_id":2}}`,
+			expectedBuildVersion:   "2.5.0",
+			expectedRippledVersion: "2.4.0",
+			expectedServerVersion:  "2.5.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response InfoResponse
+			require.NoError(t, json.Unmarshal([]byte(tt.response), &response))
+			require.Equal(t, tt.expectedBuildVersion, response.Info.BuildVersion)
+			require.Equal(t, tt.expectedRippledVersion, response.Info.RippledVersion)
+			require.Equal(t, tt.expectedServerVersion, response.Info.ServerVersion())
+		})
+	}
+}
+
+func TestServerInfoLoadFactor(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		expected float64
+	}{
+		{name: "missing defaults to one", response: `{"info":{}}`, expected: 1},
+		{name: "fractional", response: `{"info":{"load_factor":1.5}}`, expected: 1.5},
+		{name: "explicit zero", response: `{"info":{"load_factor":0}}`, expected: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response InfoResponse
+			require.NoError(t, json.Unmarshal([]byte(tt.response), &response))
+			require.InDelta(t, tt.expected, response.Info.LoadFactor, 0)
+		})
+	}
+}
+
+func TestServerInfoOptionalLoadFactors(t *testing.T) {
+	responseJSON := `{"info":{
+		"load_factor_local":1.00390625,
+		"load_factor_net":1.0078125,
+		"load_factor_cluster":1.015625,
+		"load_factor_fee_escalation":1.25,
+		"load_factor_fee_queue":1.5,
+		"load_factor_server":1.03125
+	}}`
+
+	var response InfoResponse
+	require.NoError(t, json.Unmarshal([]byte(responseJSON), &response))
+	require.InDelta(t, 1.00390625, response.Info.LoadFactorLocal, 0)
+	require.InDelta(t, 1.0078125, response.Info.LoadFactorNet, 0)
+	require.InDelta(t, 1.015625, response.Info.LoadFactorCluster, 0)
+	require.InDelta(t, 1.25, response.Info.LoadFactorFeeEscalation, 0)
+	require.InDelta(t, 1.5, response.Info.LoadFactorFeeQueue, 0)
+	require.InDelta(t, 1.03125, response.Info.LoadFactorServer, 0)
+}
+
+func TestServerInfoBaseFeeXRPPresence(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		expected float64
+		present  bool
+	}{
+		{name: "missing", response: `{"info":{"validated_ledger":{}}}`},
+		{name: "null", response: `{"info":{"validated_ledger":{"base_fee_xrp":null}}}`},
+		{name: "explicit zero", response: `{"info":{"validated_ledger":{"base_fee_xrp":0}}}`, present: true},
+		{name: "positive", response: `{"info":{"validated_ledger":{"base_fee_xrp":0.00001}}}`, expected: 0.00001, present: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var response InfoResponse
+			require.NoError(t, json.Unmarshal([]byte(tt.response), &response))
+			actual := response.Info.ValidatedLedger.BaseFeeXRP
+			if !tt.present {
+				require.Nil(t, actual)
+				return
+			}
+			require.NotNil(t, actual)
+			require.InDelta(t, tt.expected, *actual, 0)
+		})
+	}
+}
+
 func TestServerInfoResponse(t *testing.T) {
+	baseFeeXRP := 0.00001
 	s := InfoResponse{
 		Info: servertypes.Info{
 			BuildVersion:    "1.9.4",
@@ -50,7 +187,7 @@ func TestServerInfoResponse(t *testing.T) {
 			Uptime: 4360976,
 			ValidatedLedger: servertypes.ClosedLedger{
 				Age:            1,
-				BaseFeeXRP:     0.00001,
+				BaseFeeXRP:     &baseFeeXRP,
 				Hash:           "3147A41F5F013209581FCDCBBB7A87A4F01EF6842963E13B2B14C8565E00A22B",
 				ReserveBaseXRP: 10,
 				ReserveIncXRP:  2,

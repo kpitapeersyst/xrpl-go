@@ -17,6 +17,10 @@ type STObject struct {
 	binarySerializer interfaces.BinarySerializer
 }
 
+// RawFieldValueOverrides maps field names to their serialized value bytes.
+// STObject still writes each field header and variable-length prefix in canonical field order.
+type RawFieldValueOverrides map[string][]byte
+
 // NewSTObject returns a new STObject with the given binary serializer.
 func NewSTObject(bs interfaces.BinarySerializer) *STObject {
 	return &STObject{binarySerializer: bs}
@@ -27,10 +31,24 @@ func NewSTObject(bs interfaces.BinarySerializer) *STObject {
 // and value), and then serializing each field instance.
 // This method returns an error if the JSON input is not a valid object.
 func (t *STObject) FromJSON(json any) ([]byte, error) {
-	if _, ok := json.(map[string]any); !ok {
+	return t.fromJSON(json, nil)
+}
+
+// FromJSONWithRawFieldValueOverrides converts a JSON object into a serialized byte slice and
+// replaces the value bytes of fields in the current object with the supplied raw values.
+func (t *STObject) FromJSONWithRawFieldValueOverrides(
+	json any,
+	overrides RawFieldValueOverrides,
+) ([]byte, error) {
+	return t.fromJSON(json, overrides)
+}
+
+func (t *STObject) fromJSON(json any, overrides RawFieldValueOverrides) ([]byte, error) {
+	object, ok := json.(map[string]any)
+	if !ok {
 		return nil, errNotValidJSON
 	}
-	fimap, err := createFieldInstanceMapFromJson(json.(map[string]any))
+	fimap, err := createFieldInstanceMapFromJson(object)
 	if err != nil {
 		return nil, err
 	}
@@ -42,10 +60,21 @@ func (t *STObject) FromJSON(json any) ([]byte, error) {
 			continue
 		}
 
-		st := GetSerializedType(v.Type)
-		b, err := st.FromJSON(fimap[v])
-		if err != nil {
-			return nil, err
+		b, overridden := overrides[v.FieldName]
+		if !overridden {
+			st := GetSerializedType(v.Type)
+			if st == nil {
+				return nil, fmt.Errorf("unknown type %q for field %q", v.Type, v.FieldName)
+			}
+
+			if v.Type == "UInt64" {
+				b, err = (&UInt64{}).fromJSON(fimap[v], uint64JSONBaseForField(v.FieldName))
+			} else {
+				b, err = st.FromJSON(fimap[v])
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
 		err = t.binarySerializer.WriteFieldAndValue(v, b)
 		if err != nil {
@@ -89,7 +118,11 @@ func (t *STObject) ToJSON(p interfaces.BinaryParser, _ ...int) (any, error) {
 			}
 
 		} else {
-			res, err = st.ToJSON(p)
+			if fi.Type == "UInt64" {
+				res, err = st.ToJSON(p, uint64JSONBaseForField(fi.FieldName))
+			} else {
+				res, err = st.ToJSON(p)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("ToJSON error for field %q (type=%s): %w", fi.FieldName, fi.Type, err)
 			}
@@ -131,7 +164,7 @@ func createFieldInstanceMapFromJson(json map[string]any) (map[definitions.FieldI
 		}
 
 		// Decode X-address
-		classicAddr, tag, _, err := addresscodec.XAddressToClassicAddress(strVal)
+		classicAddr, tag, hasTag, _, err := addresscodec.XAddressToClassicAddress(strVal)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode X-address for field %s: %w", k, err)
 		}
@@ -140,7 +173,7 @@ func createFieldInstanceMapFromJson(json map[string]any) (map[definitions.FieldI
 		processedJSON[k] = classicAddr
 
 		// If there's an embedded tag, add it as SourceTag or DestinationTag
-		if tag != 0 {
+		if hasTag {
 			var tagFieldName string
 			switch k {
 			case "Destination":
@@ -148,14 +181,11 @@ func createFieldInstanceMapFromJson(json map[string]any) (map[definitions.FieldI
 			case "Account":
 				tagFieldName = "SourceTag"
 			default:
-				return nil, fmt.Errorf("%s cannot have an associated tag", k)
+				return nil, fmt.Errorf("%w: %s", ErrAccountIDTagNotAllowed, k)
 			}
 
-			// Check for duplicate tags
-			if existingTag, exists := processedJSON[tagFieldName]; exists {
-				if existingTag != tag {
-					return nil, fmt.Errorf("duplicate %s: X-address tag (%d) does not match existing tag (%v)", tagFieldName, tag, existingTag)
-				}
+			if existing, exists := processedJSON[tagFieldName]; exists {
+				return nil, fmt.Errorf("%w: %s X-address has embedded tag %d but %s=%v is also set", ErrDuplicateXAddressTag, k, tag, tagFieldName, existing)
 			}
 			processedJSON[tagFieldName] = tag
 		}

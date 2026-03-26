@@ -1,12 +1,25 @@
 package rpc
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Peersyst/xrpl-go/xrpl/common"
+	"github.com/Peersyst/xrpl-go/xrpl/internal/clientconfig"
 )
+
+const defaultMaxResponseSize int64 = 64 * 1024 * 1024
+
+// SetLogger overrides the *log.Logger used for SDK-emitted warnings (currently
+// just the insecure-scheme warning). Pass nil to silence the warnings entirely.
+// The default logger writes to stdlib's log.Default(), preserving prior behavior.
+// The logger is shared across xrpl-go's client packages; calling SetLogger here
+// or in xrpl/websocket has the same effect.
+func SetLogger(l *log.Logger) {
+	clientconfig.SetLogger(l)
+}
 
 // HTTPClient defines the interface for sending HTTP requests.
 type HTTPClient interface {
@@ -19,16 +32,23 @@ type Config struct {
 	URL        string
 	Headers    map[string][]string
 
-	// Retry config
+	// Reliable-submission monitoring config.
 	maxRetries int
 	retryDelay time.Duration
 
+	// Response body config
+	maxResponseSize int64
+
 	// Fee config
-	maxFeeXRP  float32
-	feeCushion float32
+	maxFeeXRP  string
+	feeCushion float64
 
 	// Faucet config
 	faucetProvider common.FaucetProvider
+
+	// Trusted network identity override.
+	networkID    *uint32
+	buildVersion string
 
 	timeout time.Duration
 }
@@ -37,35 +57,54 @@ type Config struct {
 type ConfigOpt func(c *Config)
 
 // WithHTTPClient returns a ConfigOpt that sets a custom HTTPClient.
+// Configured authorization requires an HTTPS endpoint. For *http.Client values,
+// XRPL Go rejects every authenticated HTTPS-to-HTTP redirect, including a
+// cross-host redirect where net/http would remove Authorization. Other
+// implementations control their own redirects and any credentials that they add.
 func WithHTTPClient(cl HTTPClient) ConfigOpt {
 	return func(c *Config) {
 		c.HTTPClient = cl
 	}
 }
 
-// WithMaxRetries returns a ConfigOpt that sets the maximum number of retries.
+// WithMaxRetries limits consecutive incomplete reliable-submission polling
+// rounds caused by query or transport errors. It does not limit successful
+// finality polling. The value must be positive.
 func WithMaxRetries(maxRetries int) ConfigOpt {
 	return func(c *Config) {
 		c.maxRetries = maxRetries
 	}
 }
 
-// WithRetryDelay returns a ConfigOpt that sets the delay between retry attempts.
+// WithRetryDelay sets the delay between reliable-submission polling rounds.
 func WithRetryDelay(retryDelay time.Duration) ConfigOpt {
 	return func(c *Config) {
 		c.retryDelay = retryDelay
 	}
 }
 
-// WithMaxFeeXRP returns a ConfigOpt that sets the maximum fee in XRP.
-func WithMaxFeeXRP(maxFeeXRP float32) ConfigOpt {
+// WithMaxResponseSize returns a ConfigOpt that sets the maximum response body size.
+// Set to 0 to disable the response size limit.
+// Negative values are replaced with the default.
+func WithMaxResponseSize(maxResponseSize int64) ConfigOpt {
+	return func(c *Config) {
+		if maxResponseSize < 0 {
+			c.maxResponseSize = defaultMaxResponseSize
+			return
+		}
+		c.maxResponseSize = maxResponseSize
+	}
+}
+
+// WithMaxFeeXRP returns a ConfigOpt that sets the maximum fee in XRP as a decimal string.
+func WithMaxFeeXRP(maxFeeXRP string) ConfigOpt {
 	return func(c *Config) {
 		c.maxFeeXRP = maxFeeXRP
 	}
 }
 
 // WithFeeCushion returns a ConfigOpt that sets the fee cushion multiplier.
-func WithFeeCushion(feeCushion float32) ConfigOpt {
+func WithFeeCushion(feeCushion float64) ConfigOpt {
 	return func(c *Config) {
 		c.feeCushion = feeCushion
 	}
@@ -78,11 +117,21 @@ func WithFaucetProvider(fp common.FaucetProvider) ConfigOpt {
 	}
 }
 
+// WithNetworkIdentity configures a network identity from a trusted deployment.
+// A nonempty buildVersion is required to bypass server_info discovery. An empty
+// buildVersion leaves the identity incomplete, so the client performs discovery.
+func WithNetworkIdentity(networkID uint32, buildVersion string) ConfigOpt {
+	return func(c *Config) {
+		c.networkID = &networkID
+		c.buildVersion = buildVersion
+	}
+}
+
 // WithTimeout returns a ConfigOpt that sets the request timeout for the HTTP client.
 func WithTimeout(timeout time.Duration) ConfigOpt {
 	return func(c *Config) {
 		c.timeout = timeout
-		if hc, ok := c.HTTPClient.(*http.Client); ok {
+		if hc, ok := c.HTTPClient.(*http.Client); ok && hc != nil {
 			hc.Timeout = timeout
 		}
 	}
@@ -106,16 +155,23 @@ func NewClientConfig(url string, opts ...ConfigOpt) (*Config, error) {
 			"Content-Type": {"application/json"},
 		},
 
-		maxRetries: common.DefaultMaxRetries,
-		retryDelay: common.DefaultRetryDelay,
-		maxFeeXRP:  common.DefaultMaxFeeXRP,
-		feeCushion: common.DefaultFeeCushion,
-		timeout:    common.DefaultTimeout,
+		maxRetries:      common.DefaultMaxRetries,
+		retryDelay:      common.DefaultRetryDelay,
+		maxResponseSize: defaultMaxResponseSize,
+		maxFeeXRP:       common.DefaultMaxFeeXRP,
+		feeCushion:      common.DefaultFeeCushion,
+		timeout:         common.DefaultTimeout,
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
+
+	if _, err := validateAuthorizationTransport(cfg.URL, cfg.Headers, cfg.HTTPClient); err != nil {
+		return nil, err
+	}
+
+	clientconfig.WarnIfInsecureScheme("rpc", cfg.URL)
 
 	// Keep the default HTTP client aligned with the config timeout.
 	// If the HTTP client has a custom timeout, sync it to the config to prevent divergence.

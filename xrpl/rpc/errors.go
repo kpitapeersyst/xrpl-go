@@ -3,48 +3,95 @@ package rpc
 import (
 	"errors"
 	"fmt"
+
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 )
 
 const (
 	// txnNotFound is the error message returned by the xrpl node when requesting for a not found transaction.
 	txnNotFound = "txnNotFound"
+	// actNotFound is the error message returned by the xrpl node when requesting for a not found account.
+	actNotFound = "actNotFound"
 )
 
 var (
 	// transaction
 
-	// ErrMissingTxSignatureOrSigningPubKey is returned when a transaction lacks both TxSignature and SigningPubKey.
-	ErrMissingTxSignatureOrSigningPubKey = errors.New("transaction must include either TxSignature or SigningPubKey")
-	// ErrSignerDataIsEmpty is returned when signer data is empty or missing.
-	ErrSignerDataIsEmpty = errors.New("signer data must not be empty")
-	// ErrMissingLastLedgerSequenceInTransaction is returned when LastLedgerSequence is missing from a transaction.
+	// ErrMissingTxSignatureOrSigningPubKey is returned when a transaction has no complete signing form.
+	ErrMissingTxSignatureOrSigningPubKey = errors.New("transaction must include a complete TxnSignature/SigningPubKey or Signers form")
+	// ErrInvalidSignedTransaction is returned when signing fields are malformed, incomplete, empty, or mixed.
+	ErrInvalidSignedTransaction = clientinternal.ErrInvalidSignedTransaction
+	// ErrNilTransaction is returned when a nil transaction is submitted or autofilled.
+	ErrNilTransaction = errors.New("transaction must not be nil")
+	// ErrTransactionNotMultisigned is returned when SubmitMultisigned receives a transaction in another signing form.
+	ErrTransactionNotMultisigned = clientinternal.ErrTransactionNotMultisigned
+	// ErrSignerDataIsEmpty is a compatibility alias for ErrTransactionNotMultisigned.
+	//
+	// Deprecated: Use ErrTransactionNotMultisigned.
+	ErrSignerDataIsEmpty = ErrTransactionNotMultisigned
+	// ErrMissingLastLedgerSequenceInTransaction is returned when a reliable-submission transaction does not contain LastLedgerSequence.
 	ErrMissingLastLedgerSequenceInTransaction = errors.New("missing LastLedgerSequence in transaction")
 	// ErrMissingWallet is returned when a wallet is required but not provided for an unsigned transaction.
 	ErrMissingWallet = errors.New("wallet must be provided when submitting an unsigned transaction")
 	// ErrMissingAccountInTransaction is returned when the Account field is missing from a transaction.
 	ErrMissingAccountInTransaction = errors.New("missing Account in transaction")
-	// ErrTransactionTypeMissing is returned when the transaction type is missing from a transaction.
-	ErrTransactionTypeMissing = errors.New("transaction type is missing in transaction")
-	// ErrTransactionNotFound is returned when a transaction cannot be found.
-	ErrTransactionNotFound = errors.New("transaction not found")
+	// ErrPreliminaryResult indicates a malformed preliminary submit result.
+	ErrPreliminaryResult = clientinternal.ErrPreliminaryResult
+	// ErrTransactionExpired indicates ledger-driven expiry after LastLedgerSequence.
+	ErrTransactionExpired = clientinternal.ErrTransactionExpired
+	// ErrFinalityTransport indicates repeated transport failures during monitoring.
+	ErrFinalityTransport = clientinternal.ErrFinalityTransport
+	// ErrInvalidPollInterval indicates a negative reliable-submission poll interval.
+	ErrInvalidPollInterval = clientinternal.ErrInvalidPollInterval
+	// ErrInvalidMaxRetries indicates a non-positive reliable-submission retry limit.
+	ErrInvalidMaxRetries = clientinternal.ErrInvalidMaxRetries
+	// ErrInvalidLastLedgerSequence indicates a zero reliable-submission ledger boundary.
+	ErrInvalidLastLedgerSequence = clientinternal.ErrInvalidLastLedgerSequence
 	// ErrInvalidFulfillmentLength is returned when the fulfillment length is invalid.
 	ErrInvalidFulfillmentLength = errors.New("invalid fulfillment length")
-	// ErrMismatchedTag is returned when a transaction tag field does not match the expected value.
-
 	// fields
 
+	// ErrAddressFieldIsNotAString is returned when an address field has the wrong Go type.
+	ErrAddressFieldIsNotAString = clientinternal.ErrAddressFieldIsNotAString
+	// ErrTagFieldIsNotAUint32 is returned when an explicit transaction tag has the wrong Go type.
+	ErrTagFieldIsNotAUint32 = clientinternal.ErrTagFieldIsNotAUint32
+	// ErrInvalidAddress is returned when an autofilled address is neither classic nor an X-address.
+	ErrInvalidAddress = clientinternal.ErrInvalidAddress
+	// ErrMismatchedTag is returned when an explicit transaction tag conflicts with an X-address tag.
+	ErrMismatchedTag = clientinternal.ErrMismatchedTag
+	// ErrAccountIDTagNotAllowed is returned when a tagless AccountID field receives a tagged X-address.
+	ErrAccountIDTagNotAllowed = clientinternal.ErrAccountIDTagNotAllowed
+
 	// ErrRawTransactionsFieldIsNotAnArray is returned when the RawTransactions field is not an array type.
-	ErrRawTransactionsFieldIsNotAnArray = errors.New("field RawTransactions must be an array")
+	ErrRawTransactionsFieldIsNotAnArray = clientinternal.ErrRawTransactionsFieldIsNotAnArray
 	// ErrRawTransactionFieldIsNotAnObject is returned when the RawTransaction field is not an object type.
-	ErrRawTransactionFieldIsNotAnObject = errors.New("field RawTransaction must be an object")
-	// ErrSigningPubKeyFieldMustBeEmpty is returned when the signingPubKey field should be empty but isn't.
-	ErrSigningPubKeyFieldMustBeEmpty = errors.New("field SigningPubKey must be empty")
-	// ErrTxnSignatureFieldMustBeEmpty is returned when the txnSignature field should be empty but isn't.
-	ErrTxnSignatureFieldMustBeEmpty = errors.New("field TxnSignature must be empty")
-	// ErrSignersFieldMustBeEmpty is returned when the signers field should be empty but isn't.
-	ErrSignersFieldMustBeEmpty = errors.New("field Signers must be empty")
-	// ErrAccountFieldIsNotAString is returned when the account field is not a string type.
-	ErrAccountFieldIsNotAString = errors.New("field Account must be a string")
+	ErrRawTransactionFieldIsNotAnObject = clientinternal.ErrRawTransactionFieldIsNotAnObject
+	// ErrBatchRawTransactionsCount is returned when a Batch does not contain 2 through 8 inner transactions.
+	ErrBatchRawTransactionsCount = clientinternal.ErrBatchRawTransactionsCount
+	// ErrSigningPubKeyFieldMustBeEmpty is returned when the SigningPubKey field should be empty but isn't.
+	ErrSigningPubKeyFieldMustBeEmpty = clientinternal.ErrSigningPubKeyFieldMustBeEmpty
+	// ErrTxnSignatureFieldMustBeEmpty is returned when the TxnSignature field should be absent but isn't.
+	ErrTxnSignatureFieldMustBeEmpty = clientinternal.ErrTxnSignatureFieldMustBeEmpty
+	// ErrSignersFieldMustBeEmpty is returned when the Signers field should be absent but isn't.
+	ErrSignersFieldMustBeEmpty = clientinternal.ErrSignersFieldMustBeEmpty
+	// ErrLastLedgerSequenceFieldMustBeAbsent is returned when an inner Batch includes LastLedgerSequence.
+	ErrLastLedgerSequenceFieldMustBeAbsent = clientinternal.ErrLastLedgerSequenceFieldMustBeAbsent
+	// ErrAccountFieldIsNotAString is returned when the Account field is not a string type.
+	ErrAccountFieldIsNotAString = clientinternal.ErrAccountFieldIsNotAString
+	// ErrNetworkIDFieldIsNotAUint32 is returned when the NetworkID field is set but not a uint32.
+	ErrNetworkIDFieldIsNotAUint32 = clientinternal.ErrNetworkIDFieldIsNotAUint32
+	// ErrNetworkIDFieldMismatch is returned when the NetworkID field does not match the expected NetworkID.
+	ErrNetworkIDFieldMismatch = clientinternal.ErrNetworkIDFieldMismatch
+	// ErrNetworkIDFieldUnexpected is returned when NetworkID must be omitted for the target network.
+	ErrNetworkIDFieldUnexpected = clientinternal.ErrNetworkIDFieldUnexpected
+	// ErrNetworkIDUnavailable is returned when server identity discovery did not produce a network ID.
+	ErrNetworkIDUnavailable = clientinternal.ErrNetworkIDUnavailable
+	// ErrBuildVersionUnavailable is returned when restricted-network policy cannot be determined without a build version.
+	ErrBuildVersionUnavailable = clientinternal.ErrBuildVersionUnavailable
+	// ErrInvalidBuildVersion is returned when the discovered rippled version cannot be compared.
+	ErrInvalidBuildVersion = clientinternal.ErrInvalidBuildVersion
+	// ErrNetworkIDOverrideMismatch is returned when an override differs from server_info.
+	ErrNetworkIDOverrideMismatch = clientinternal.ErrNetworkIDOverrideMismatch
 	// ErrRawTransactionsFieldMissing is returned when the RawTransactions field is missing from a Batch transaction.
 	ErrRawTransactionsFieldMissing = errors.New("RawTransactions field missing from Batch transaction")
 	// ErrRawTransactionFieldMissing is returned when the RawTransaction field is missing from a wrapper.
@@ -56,9 +103,15 @@ var (
 
 	// ErrCannotFundWalletWithoutClassicAddress is returned when attempting to fund a wallet without a classic address.
 	ErrCannotFundWalletWithoutClassicAddress = errors.New("cannot fund wallet without a classic address")
+	// ErrFundWalletBalanceNotUpdated is returned when the wallet balance does not update on the validated ledger after polling.
+	ErrFundWalletBalanceNotUpdated = errors.New("fund wallet: balance did not update on validated ledger after polling")
 
 	// fees
 
+	// ErrInvalidFeeValue is returned when fee configuration is not a finite, non-negative decimal value.
+	ErrInvalidFeeValue = clientinternal.ErrInvalidFeeValue
+	// ErrFeeHasTooManyDecimals is returned when an XRP fee cannot be represented as whole drops.
+	ErrFeeHasTooManyDecimals = clientinternal.ErrFeeHasTooManyDecimals
 	// ErrCouldNotGetBaseFeeXrp is returned when BaseFeeXrp cannot be retrieved from ServerInfo.
 	ErrCouldNotGetBaseFeeXrp = errors.New("get fee xrp: could not get BaseFeeXrp from ServerInfo")
 	// ErrCouldNotFetchOwnerReserve is returned when the owner reserve fee cannot be fetched.
@@ -80,12 +133,24 @@ var (
 	// payment
 
 	// ErrAmountAndDeliverMaxMustBeIdentical is returned when Amount and DeliverMax fields are not identical.
-	ErrAmountAndDeliverMaxMustBeIdentical = errors.New("payment transaction: Amount and DeliverMax fields must be identical when both are provided")
+	ErrAmountAndDeliverMaxMustBeIdentical = clientinternal.ErrAmountAndDeliverMaxMustBeIdentical
 
 	// config
 
 	// ErrEmptyURL is returned when the provided URL is empty (no port or IP specified).
 	ErrEmptyURL = errors.New("empty port and IP provided")
+	// ErrNilHTTPClient is returned when RPC configuration contains a nil HTTP client.
+	ErrNilHTTPClient = errors.New("rpc HTTP client must not be nil")
+	// ErrResponseErrorFieldIsNotAString is returned when an RPC response contains a non-string error field.
+	ErrResponseErrorFieldIsNotAString = errors.New("rpc response error field must be a string")
+	// errTooManyRedirects matches the net/http default redirect limit error.
+	errTooManyRedirects = errors.New("stopped after 10 redirects")
+	// ErrInsecureAuthorization is returned when RPC authorization cannot be guaranteed to use HTTPS across redirects.
+	ErrInsecureAuthorization = errors.New("rpc authorization requires an HTTPS endpoint and redirect-safe HTTP client")
+	// ErrAuthorizationRequestFailed replaces an authorized request error whose diagnostic exposed credential material.
+	ErrAuthorizationRequestFailed = errors.New("authorized RPC request failed")
+	// ErrResponseTooLarge is returned when an RPC response body exceeds the configured limit.
+	ErrResponseTooLarge = errors.New("rpc response body exceeds maximum size")
 )
 
 // Dynamic errors
@@ -110,17 +175,6 @@ type ErrFailedToMarshalJSONRPCRequest struct {
 // Error implements the error interface for ErrFailedToMarshalJSONRPCRequest
 func (e ErrFailedToMarshalJSONRPCRequest) Error() string {
 	return fmt.Sprintf("failed to marshal JSON-RPC request for method %s with parameters %+v: %v", e.Method, e.Params, e.Err)
-}
-
-// ErrMismatchedTag is returned when a transaction tag field does not match the expected value.
-type ErrMismatchedTag struct {
-	Expected string
-	Actual   string
-}
-
-// Error implements the error interface for ErrMismatchedTag
-func (e ErrMismatchedTag) Error() string {
-	return fmt.Sprintf("transaction tag mismatch: %q must equal %q", e.Actual, e.Expected)
 }
 
 // ErrFailedToParseFee is returned when fee parsing fails.

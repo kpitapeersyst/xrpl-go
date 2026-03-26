@@ -43,7 +43,7 @@ The `crypto` package exports the following algorithm getters that satisfy the `K
 You can use them to generate a seed or derive a keypair as the following example shows:
 
 ```go
-seed, err := keypairs.GenerateSeed("", crypto.SECP256K1(), random.NewRandomizer())
+seed, err := keypairs.GenerateSeed(nil, crypto.SECP256K1(), random.NewRandomizer())
 ```
 
 ## API
@@ -52,7 +52,7 @@ These are the functions available in this package:
 
 ```go
 // Key generation
-func GenerateSeed(entropy string, alg interfaces.KeypairCryptoAlg, r interfaces.Randomizer) (string, error)
+func GenerateSeed(entropy []byte, alg interfaces.KeypairCryptoAlg, r interfaces.Randomizer) (string, error)
 func DeriveKeypair(seed string, validator bool) (private, public string, err error)
 func DeriveClassicAddress(pubKey string) (string, error)
 func DeriveNodeAddress(pubKey string, alg interfaces.NodeDerivationCryptoAlg) (string, error)
@@ -72,14 +72,35 @@ They can be split into two groups:
 #### GenerateSeed
 
 ```go
-func GenerateSeed(entropy string, alg interfaces.KeypairCryptoAlg, r interfaces.Randomizer) (string, error)
+func GenerateSeed(entropy []byte, alg interfaces.KeypairCryptoAlg, r interfaces.Randomizer) (string, error)
 ```
 
-Generate a seed that can be used to generate keypairs. You can specify the entropy of the seed or let the function generate a random one (by passing an empty string as entropy and providing a randomizer) and use one of the supported algorithms to generate the seed. The result is a base58-encoded seed, which starts with the character `s`.
+Generate a seed that can be used to generate keypairs. You can provide exactly 16 raw entropy bytes or let the function generate random entropy by passing nil or an empty byte slice and providing a randomizer. The result is a base58-encoded seed, which starts with the character `s`.
 
 :::info
 
 A randomizer satisfies the `Randomizer` interface. The `random` package exports a `NewRandomizer` function that returns a new randomizer.
+
+:::
+
+:::caution
+
+Caller-supplied entropy must be exactly 16 raw bytes. Do not pass passphrases directly. If you need deterministic passphrase-based generation, derive 16 bytes before calling this function, for example with SHA-512 and the first 16 bytes, HKDF, or a password KDF. The resulting seed is still limited by the real entropy of the input.
+
+:::
+
+:::note
+
+Migration only: older versions silently used the first 16 bytes of any non-empty string passed to `GenerateSeed`. If you need to recover the exact same seed from a legacy input, reproduce that truncation before calling this function:
+
+```go
+legacyEntropy := []byte("setPasswordOverLen16")
+seed, err := keypairs.GenerateSeed(legacyEntropy[:addresscodec.FamilySeedLength], crypto.ED25519(), nil)
+```
+
+If your legacy input was shorter than 16 bytes the old `GenerateSeed` would have panicked, so there is no deterministic seed to recover.
+
+Do not use this pattern for new wallets. New code should provide 16 bytes generated from a cryptographically secure random source, or 16 bytes derived deliberately outside this function.
 
 :::
 
@@ -97,7 +118,7 @@ Derives a keypair (private and public keys) from a seed. If the `validator` para
 func DeriveClassicAddress(pubKey string) (string, error)
 ```
 
-After deriving a keypair, you can derive the classic address from the public key. The result is a base58 encoded address, which starts with the character `r`. If you're interested in X-Address derivation, the `address-codec` package contains functions to encode and decode X-Addresses from and to classic addresses.
+After deriving a keypair, you can derive the classic address from the public key. The result is a base58 encoded address, which starts with the character `r`. XRPL account APIs accept Ed25519 public keys and compressed secp256k1 public keys only. Uncompressed 65-byte secp256k1 public keys and invalid compressed curve points return `ErrInvalidPublicKeyFormat`. If you're interested in X-Address derivation, the `address-codec` package contains functions to encode and decode X-Addresses from and to classic addresses.
 
 #### DeriveNodeAddress
 
@@ -115,7 +136,7 @@ Derives a node address from a public key. The result is a base58-encoded address
 func Sign(msg, privKey string) (string, error)
 ```
 
-Signs the provided message with the provided private key. To be able to sign a message, the private key must be a valid keypair and the message must be hex-encoded. The result is a hexadecimal string that represents the signature of the message. To verify the signature, you can use the `Validate` function.
+Signs the provided message with the provided private key. The private key and message must be hexadecimal. secp256k1 signing accepts raw and `00`-prefixed private keys and rejects zero or out-of-range scalars. Invalid key formats return `ErrInvalidPrivateKeyFormat`, which also matches `ErrInvalidCryptoImplementation` through `errors.Is`. The result is a hexadecimal signature that you can verify with `Validate`.
 
 #### Validate
 
@@ -123,13 +144,19 @@ Signs the provided message with the provided private key. To be able to sign a m
 func Validate(msg, pubKey, sig string) (bool, error)
 ```
 
-Verifies a signature of a message. To be able to verify a signature, the public key must be valid, and the message and the signature must be hex-encoded. The result is a boolean value that indicates if the signature is valid or not.
+Verifies a signature of a message. The public key, message, and signature must be hexadecimal. Ed25519 and compressed secp256k1 account public keys are supported. secp256k1 verification rejects high-S signatures that are not fully canonical for XRPL. Invalid public key formats return `ErrInvalidPublicKeyFormat`, which also matches `ErrInvalidCryptoImplementation` through `errors.Is`.
 
 ## Guides
 
 ### How to generate a new random keypair
 
-This example generates a new keypair using the `SECP256K1` algorithm and a random entropy. It then derives a keypair from the seed and derives the classic address from the public key.
+This example generates a new keypair using the `SECP256K1` algorithm and random entropy. It then derives the keypair and classic address.
+
+:::warning
+
+This example prints the seed and private key for local learning purposes only. Never print, log, share, commit, or fund credentials exposed this way in production.
+
+:::
 
 ```go
 package main
@@ -144,7 +171,7 @@ import (
 )
 
 func main() {
-	seed, err := keypairs.GenerateSeed("", crypto.SECP256K1(), random.NewRandomizer())
+	seed, err := keypairs.GenerateSeed(nil, crypto.SECP256K1(), random.NewRandomizer())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -166,9 +193,15 @@ func main() {
 }
 ```
 
-### How to generate a new keypair from entropy
+### How to generate a new keypair from raw entropy
 
-This example generates a new keypair using the `ED25519` algorithm and a provided entropy. Then, it derives the keypair and the address as the previous example.
+This example generates a new keypair using the `ED25519` algorithm and exactly 16 raw entropy bytes. Then, it derives the keypair and the address as the previous example.
+
+:::warning
+
+This example prints the seed and private key for local learning purposes only. Never print, log, share, commit, or fund credentials exposed this way in production.
+
+:::
 
 ```go
 package main
@@ -182,7 +215,13 @@ import (
 )
 
 func main() {
-	seed, err := keypairs.GenerateSeed("ThisIsMyCustomEntropy", crypto.ED25519(), nil)
+	rawEntropy := []byte{
+		0x00, 0x01, 0x02, 0x03,
+		0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0A, 0x0B,
+		0x0C, 0x0D, 0x0E, 0x0F,
+	}
+	seed, err := keypairs.GenerateSeed(rawEntropy, crypto.ED25519(), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -193,6 +232,9 @@ func main() {
 	}
 
 	addr, err := keypairs.DeriveClassicAddress(pubK)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println("Seed: ", seed)
 	fmt.Println("Private Key: ", privK)

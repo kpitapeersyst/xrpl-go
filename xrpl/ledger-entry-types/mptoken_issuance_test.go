@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
@@ -55,6 +56,48 @@ func TestMPTokenIssuance_SetLsfMPTCanClawback(t *testing.T) {
 	require.Equal(t, LsfMPTCanClawback, mpTokenIssuance.Flags)
 }
 
+func TestMPTokenIssuance_SetLsfMPTCanHoldConfidentialBalance(t *testing.T) {
+	mpTokenIssuance := &MPTokenIssuance{}
+	mpTokenIssuance.SetLsfMPTCanHoldConfidentialBalance()
+	require.Equal(t, LsfMPTCanHoldConfidentialBalance, mpTokenIssuance.Flags)
+}
+
+func TestMPTokenIssuanceImmutableFlagValues(t *testing.T) {
+	require.Equal(t, uint32(0x00000002), LsifMPTCanLock)
+	require.Equal(t, uint32(0x00000004), LsifMPTRequireAuth)
+	require.Equal(t, uint32(0x00000008), LsifMPTCanEscrow)
+	require.Equal(t, uint32(0x00000010), LsifMPTCanTrade)
+	require.Equal(t, uint32(0x00000020), LsifMPTCanTransfer)
+	require.Equal(t, uint32(0x00000040), LsifMPTCanClawback)
+	require.Equal(t, uint32(0x00000080), LsifMPTCanHoldConfidentialBalance)
+	require.Equal(t, uint32(0x00010000), LsifMPTMetadata)
+	require.Equal(t, uint32(0x00020000), LsifMPTTransferFee)
+}
+
+func TestMPTokenIssuance_OmitsAbsentOptionalFields(t *testing.T) {
+	raw := `{
+		"LedgerEntryType": "MPTokenIssuance",
+		"Flags": 0,
+		"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+		"OutstandingAmount": "0",
+		"OwnerNode": "0",
+		"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
+		"PreviousTxnLgrSeq": 234644,
+		"Sequence": 1
+	}`
+
+	var issuance MPTokenIssuance
+	require.NoError(t, json.Unmarshal([]byte(raw), &issuance))
+
+	encoded, err := json.Marshal(&issuance)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &fields))
+	require.NotContains(t, fields, "AssetScale")
+	require.NotContains(t, fields, "TransferFee")
+	require.NotContains(t, fields, "MPTokenMetadata")
+}
+
 func TestMPTokenIssuanceSerialization(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -69,14 +112,15 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTLocked,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1f",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
+				LockedAmount:      "1",
 			},
 			expected: `{
 	"index": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
@@ -84,14 +128,15 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 1,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1f",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
-	"Sequence": 1
+	"Sequence": 1,
+	"LockedAmount": "1"
 }`,
 		},
 		{
@@ -102,11 +147,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTCanLock,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "000000000000001F",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -117,11 +162,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 2,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "000000000000001F",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -135,11 +180,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTRequireAuth,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -150,11 +195,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 4,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -168,11 +213,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTCanEscrow,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -183,11 +228,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 8,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -201,11 +246,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTCanTrade,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -216,11 +261,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 16,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -234,11 +279,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTCanTransfer,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -249,11 +294,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 32,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -267,11 +312,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTCanClawback,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -283,11 +328,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 64,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1
@@ -301,11 +346,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 				Flags:             LsfMPTRequireAuth,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
@@ -317,11 +362,11 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 4,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1,
@@ -329,22 +374,57 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 }`,
 		},
 		{
-			name: "pass - valid MPToken with MutableFlags",
+			name: "pass - valid MPToken with ReferenceHolding",
+			mpTokenIssuance: &MPTokenIssuance{
+				Index:             types.Hash256("A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"),
+				LedgerEntryType:   MPTokenIssuanceEntry,
+				Flags:             LsfMPTCanTransfer,
+				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
+				AssetScale:        2,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
+				TransferFee:       100,
+				MPTokenMetadata:   "7B227469636B6572",
+				OwnerNode:         "1",
+				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
+				PreviousTxnLgrSeq: 234644,
+				Sequence:          1,
+				ReferenceHolding:  types.Hash256("B738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"),
+			},
+			expected: `{
+	"index": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
+	"LedgerEntryType": "MPTokenIssuance",
+	"Flags": 32,
+	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+	"AssetScale": 2,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
+	"TransferFee": 100,
+	"MPTokenMetadata": "7B227469636B6572",
+	"OwnerNode": "1",
+	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
+	"PreviousTxnLgrSeq": 234644,
+	"Sequence": 1,
+	"ReferenceHolding": "B738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"
+}`,
+		},
+		{
+			name: "pass - valid MPToken with ImmutableFlags",
 			mpTokenIssuance: &MPTokenIssuance{
 				Index:             types.Hash256("A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9"),
 				LedgerEntryType:   MPTokenIssuanceEntry,
 				Flags:             LsfMPTCanLock | LsfMPTCanTransfer,
 				Issuer:            types.Address("rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD"),
 				AssetScale:        2,
-				MaximumAmount:     1000,
-				OutstandingAmount: 100,
+				MaximumAmount:     "1000",
+				OutstandingAmount: "100",
 				TransferFee:       100,
 				MPTokenMetadata:   "7B227469636B6572",
-				OwnerNode:         1,
+				OwnerNode:         "1",
 				PreviousTxnID:     types.Hash256("8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB"),
 				PreviousTxnLgrSeq: 234644,
 				Sequence:          1,
-				MutableFlags:      LsmfMPTCanMutateCanLock | LsmfMPTCanMutateMetadata,
+				ImmutableFlags:    LsifMPTCanLock | LsifMPTMetadata,
 			},
 			expected: `{
 	"index": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
@@ -352,15 +432,15 @@ func TestMPTokenIssuanceSerialization(t *testing.T) {
 	"Flags": 34,
 	"Issuer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
 	"AssetScale": 2,
-	"MaximumAmount": 1000,
-	"OutstandingAmount": 100,
+	"MaximumAmount": "1000",
+	"OutstandingAmount": "100",
 	"TransferFee": 100,
 	"MPTokenMetadata": "7B227469636B6572",
-	"OwnerNode": 1,
+	"OwnerNode": "1",
 	"PreviousTxnID": "8089451B193AAD110ACED3D62BE79BB523658545E6EE8B7BB0BE573FED9BCBFB",
 	"PreviousTxnLgrSeq": 234644,
 	"Sequence": 1,
-	"MutableFlags": 65538
+	"ImmutableFlags": 65538
 }`,
 		},
 	}

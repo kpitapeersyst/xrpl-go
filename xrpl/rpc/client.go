@@ -1,16 +1,26 @@
 // Package rpc provides RPC client functionality for interacting with XRPL servers.
+//
+// A Client discovers network identity before its first identity-dependent
+// operation and caches the first successful discovery for the client lifetime.
+// A failed discovery is returned and a later operation retries it. A trusted
+// identity configured with WithNetworkIdentity bypasses discovery only when its
+// build version is non-empty.
 package rpc
 
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
-	binarycodec "github.com/Peersyst/xrpl-go/binary-codec"
-	"github.com/Peersyst/xrpl-go/xrpl/common"
+	"github.com/Peersyst/xrpl-go/pkg/typecheck"
+	commonconstants "github.com/Peersyst/xrpl-go/xrpl/common"
 	"github.com/Peersyst/xrpl-go/xrpl/hash"
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/account"
+	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	requests "github.com/Peersyst/xrpl-go/xrpl/queries/transactions"
 	rpctypes "github.com/Peersyst/xrpl-go/xrpl/rpc/types"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction"
@@ -19,24 +29,58 @@ import (
 	"github.com/Peersyst/xrpl-go/xrpl/wallet"
 )
 
+var (
+	fundWalletMaxAttempts  = 20
+	fundWalletPollInterval = 1 * time.Second
+)
+
+// maxDrainBytes caps how much of an error response body is drained before
+// retrying. A small bounded drain lets the HTTP transport reuse the
+// connection via keep-alive when the body fits, and prevents a hostile
+// upstream from forcing an unbounded read when it doesn't.
+const maxDrainBytes = 4 << 10 // 4 KiB
+
 // Client is an XRPL RPC client for sending requests and managing transactions.
 type Client struct {
 	cfg *Config
 
-	NetworkID uint32
+	networkID    *uint32
+	buildVersion string
+
+	identity networkIdentityState
 }
 
 // NewClient creates a new RPC Client with the given configuration.
 func NewClient(cfg *Config) *Client {
+	networkID := clientinternal.CloneNetworkID(cfg.networkID)
 	return &Client{
-		cfg: cfg,
+		cfg:          cfg,
+		networkID:    networkID,
+		buildVersion: cfg.buildVersion,
+		identity: networkIdentityState{
+			ready: networkID != nil && cfg.buildVersion != "",
+		},
 	}
 }
 
 // Request sends a request to the XRPL server and returns the response and any error encountered.
 func (c *Client) Request(reqParams XRPLRequest) (XRPLResponse, error) {
-	err := reqParams.Validate()
+	return c.request(context.Background(), reqParams)
+}
+
+func (c *Client) request(ctx context.Context, reqParams XRPLRequest) (XRPLResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	requestURL := c.cfg.URL
+	headers := http.Header(c.cfg.Headers).Clone()
+	requestHTTPClient, err := validateAuthorizationTransport(requestURL, headers, c.cfg.HTTPClient)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := reqParams.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -45,97 +89,162 @@ func (c *Client) Request(reqParams XRPLRequest) (XRPLResponse, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.cfg.URL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
+	const maxAttempts = 4 // 1 initial attempt + 3 retries
+	backoffDuration := c.cfg.retryDelay
 
-	// add timeout context to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.timeout)
-	defer cancel()
-	req = req.WithContext(ctx)
+	var (
+		response   *http.Response
+		cancelFunc context.CancelFunc
+	)
 
-	req.Header = c.cfg.Headers
+	// cfg.timeout bounds a single attempt, not the full retry window.
+	for attempt := range maxAttempts {
+		requestCtx, cancel := context.WithTimeout(ctx, c.cfg.timeout)
 
-	var response *http.Response
-
-	response, err = c.cfg.HTTPClient.Do(req)
-	if err != nil || response == nil {
-		return nil, err
-	}
-
-	// allow client to reuse persistent connection
-	defer func() {
-		_ = response.Body.Close()
-	}()
-	// Check for service unavailable response and retry if so
-	if response.StatusCode == 503 {
-
-		maxRetries := 3
-		backoffDuration := 1 * time.Second
-
-		for range maxRetries {
-			time.Sleep(backoffDuration)
-
-			// Make request again after waiting
-			response, err = c.cfg.HTTPClient.Do(req)
-			if err != nil {
-				return nil, err
-			}
-
-			if response.StatusCode != 503 {
-				break
-			}
-
-			// Increase backoff duration for the next retry
-			backoffDuration *= 2
+		req, err := http.NewRequestWithContext(
+			requestCtx,
+			http.MethodPost,
+			requestURL,
+			bytes.NewReader(body),
+		)
+		if err != nil {
+			cancel()
+			return nil, redactAuthorizationError(err, requestURL, headers)
 		}
 
-		if response.StatusCode == 503 {
-			// Return service unavailable error here after retry 3 times
+		// Keep the config snapshot unchanged for redaction and later retries.
+		// A custom HTTPClient can mutate request headers, so each attempt gets a clone.
+		req.Header = headers.Clone()
+
+		response, err = requestHTTPClient.Do(req)
+		if err != nil {
+			// net/http documents response as nil when Do returns an error, but
+			// custom HTTPClient impls may not follow that contract.
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			cancel()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, redactAuthorizationError(err, requestURL, headers)
+		}
+
+		// HTTPClient is an interface, custom impls may return (nil, nil),
+		// violating net/http's contract. Standard *http.Client never hits
+		// this branch.
+		if response == nil {
+			cancel()
+			return nil, &ClientError{ErrorString: "nil response from server"}
+		}
+
+		if response.StatusCode != http.StatusServiceUnavailable {
+			cancelFunc = cancel
+			break
+		}
+
+		// Drain and close the 503 response body before retrying so the connection
+		// can be reused by the HTTP client.
+		_, _ = io.CopyN(io.Discard, response.Body, maxDrainBytes)
+		_ = response.Body.Close()
+		cancel()
+
+		if attempt == maxAttempts-1 {
 			return nil, &ClientError{ErrorString: "Server is overloaded, rate limit exceeded"}
 		}
 
+		if err := clientinternal.Wait(ctx, backoffDuration); err != nil {
+			return nil, err
+		}
+		backoffDuration *= 2
 	}
+	defer cancelFunc()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	var jr Response
-	jr, err = checkForError(response)
+	jr, err = checkForError(response, c.cfg.maxResponseSize)
 	if err != nil {
-		return nil, err
+		return nil, redactAuthorizationError(err, requestURL, headers)
 	}
 
 	return &jr, nil
 }
 
+func (c *Client) requestResult(ctx context.Context, req XRPLRequest, result any) error {
+	response, err := c.request(ctx, req)
+	if err != nil {
+		return err
+	}
+	return response.GetResult(result)
+}
+
 // SubmitTxBlob sends a pre-signed transaction blob to the server.
-// It decodes the blob to confirm that it contains either a signature
-// or a signing public key, and then submits it using a submission request.
-// The failHard flag determines how strictly errors are handled.
+// Its preflight validates only the structure of signing fields. rippled remains
+// authoritative for cryptographic signature validity. AccountDelete always uses
+// fail_hard as required by reliable-submission safety guidance.
 func (c *Client) SubmitTxBlob(txBlob string, failHard bool) (*requests.SubmitResponse, error) {
-	tx, err := binarycodec.Decode(txBlob)
+	tx, err := clientinternal.DecodeTransactionBlob(txBlob)
 	if err != nil {
 		return nil, err
 	}
+	return c.submitTxBlob(context.Background(), txBlob, tx, failHard)
+}
 
-	_, okTxSig := tx["TxSignature"].(string)
-	_, okPubKey := tx["SigningPubKey"].(string)
-
-	if !okTxSig && !okPubKey {
+func (c *Client) submitTxBlob(
+	ctx context.Context,
+	txBlob string,
+	tx map[string]any,
+	failHard bool,
+) (*requests.SubmitResponse, error) {
+	signingType, err := clientinternal.InspectSignedTransaction(tx, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := clientinternal.InspectSignedBatchInners(tx); err != nil {
+		return nil, err
+	}
+	if signingType == clientinternal.UnsignedTransaction {
 		return nil, ErrMissingTxSignatureOrSigningPubKey
 	}
 
-	return c.submitRequest(&requests.SubmitRequest{
+	return c.submitRequest(ctx, &requests.SubmitRequest{
 		TxBlob:   txBlob,
-		FailHard: failHard,
+		FailHard: clientinternal.SubmissionFailHard(tx, failHard),
 	})
 }
 
-// SubmitTxBlobAndWait sends a pre-signed transaction blob to the server,
-// decodes it to retrieve the required LastLedgerSequence, submits the blob,
-// and then waits until the transaction is confirmed in a ledger. It returns
-// the transaction response if the submission is successful.
+// SubmitTxBlobAndWait submits a pre-signed transaction and waits for an
+// authoritative validated-ledger result. LastLedgerSequence is required and
+// expiry occurs only after the validated ledger passes it.
 func (c *Client) SubmitTxBlobAndWait(txBlob string, failHard bool) (*requests.TxResponse, error) {
-	tx, err := binarycodec.Decode(txBlob)
+	return c.SubmitTxBlobAndWaitContext(context.Background(), txBlob, failHard)
+}
+
+// SubmitTxBlobAndWaitContext is SubmitTxBlobAndWait with caller cancellation.
+// Context cancellation is returned as ctx.Err and is never reported as a
+// transaction failure or expiry.
+func (c *Client) SubmitTxBlobAndWaitContext(
+	ctx context.Context,
+	txBlob string,
+	failHard bool,
+) (*requests.TxResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := clientinternal.ValidateFinalityMonitoring(c.cfg.retryDelay, c.cfg.maxRetries); err != nil {
+		return nil, err
+	}
+	return c.submitTxBlobAndWait(ctx, txBlob, failHard)
+}
+
+func (c *Client) submitTxBlobAndWait(
+	ctx context.Context,
+	txBlob string,
+	failHard bool,
+) (*requests.TxResponse, error) {
+	tx, err := clientinternal.DecodeTransactionBlob(txBlob)
 	if err != nil {
 		return nil, err
 	}
@@ -144,22 +253,32 @@ func (c *Client) SubmitTxBlobAndWait(txBlob string, failHard bool) (*requests.Tx
 	if !ok {
 		return nil, ErrMissingLastLedgerSequenceInTransaction
 	}
+	if err := clientinternal.ValidateLastLedgerSequence(lastLedgerSequence); err != nil {
+		return nil, err
+	}
 
-	txResponse, err := c.SubmitTxBlob(txBlob, failHard)
+	submitResponse, err := c.submitTxBlob(ctx, txBlob, tx, failHard)
+	if err != nil {
+		return nil, err
+	}
+	if err := clientinternal.ValidatePreliminaryResult(
+		submitResponse.EngineResult,
+		submitResponse.EngineResultMessage,
+	); err != nil {
+		return nil, err
+	}
+
+	txHash, err := hash.SignTx(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	if txResponse.EngineResult != "tesSUCCESS" {
-		return nil, &ClientError{ErrorString: "transaction failed to submit with engine result: " + txResponse.EngineResult}
-	}
-
-	txHash, err := hash.SignTxBlob(txBlob)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.waitForTransaction(txHash, lastLedgerSequence)
+	return c.waitForTransaction(
+		ctx,
+		txHash,
+		lastLedgerSequence,
+		submitResponse.EngineResult,
+	)
 }
 
 // SubmitTx signs the transaction (if necessary) and submits it to the server
@@ -169,112 +288,138 @@ func (c *Client) SubmitTx(tx transaction.FlatTransaction, opts *rpctypes.SubmitO
 	if opts == nil {
 		opts = &rpctypes.SubmitOptions{}
 	}
-	txBlob, err := c.getSignedTx(tx, opts.Autofill, opts.Wallet)
+	txBlob, err := c.getSignedTx(context.Background(), tx, opts.Autofill, opts.Wallet)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.submitRequest(&requests.SubmitRequest{
-		TxBlob:   txBlob,
-		FailHard: opts.FailHard,
-	})
+	return c.SubmitTxBlob(txBlob, opts.FailHard)
 }
 
-// SubmitTxAndWait prepares a transaction by ensuring it is fully signed,
-// submits it to the server, and waits for ledger confirmation.
-// It validates that the transaction's EngineResult is successful before returning
-// the transaction response.
+// SubmitTxAndWait prepares, submits, and monitors a transaction until its
+// validated-ledger outcome is authoritative.
 func (c *Client) SubmitTxAndWait(tx transaction.FlatTransaction, opts *rpctypes.SubmitOptions) (*requests.TxResponse, error) {
+	return c.SubmitTxAndWaitContext(context.Background(), tx, opts)
+}
+
+// SubmitTxAndWaitContext is SubmitTxAndWait with caller cancellation for
+// transaction preparation, submission, and finality monitoring.
+func (c *Client) SubmitTxAndWaitContext(
+	ctx context.Context,
+	tx transaction.FlatTransaction,
+	opts *rpctypes.SubmitOptions,
+) (*requests.TxResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := clientinternal.ValidateFinalityMonitoring(c.cfg.retryDelay, c.cfg.maxRetries); err != nil {
+		return nil, err
+	}
 	if opts == nil {
 		opts = &rpctypes.SubmitOptions{}
 	}
-	// Get the signed transaction blob.
-	txBlob, err := c.getSignedTx(tx, opts.Autofill, opts.Wallet)
+	txBlob, err := c.getSignedTx(ctx, tx, opts.Autofill, opts.Wallet)
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	// Delegate to SubmitTxBlobAndWait to handle submission, engine result check,
-	// ledger sequence validation, and waiting for confirmation.
-	return c.SubmitTxBlobAndWait(txBlob, opts.FailHard)
+	return c.submitTxBlobAndWait(ctx, txBlob, opts.FailHard)
 }
 
-// SubmitMultisigned submits a multisigned transaction blob to the server and returns the response.
+// SubmitMultisigned submits a structurally complete multisigned transaction blob.
+// rippled remains authoritative for cryptographic signature validity.
 func (c *Client) SubmitMultisigned(txBlob string, failHard bool) (*requests.SubmitMultisignedResponse, error) {
-	tx, err := binarycodec.Decode(txBlob)
+	tx, err := clientinternal.DecodeTransactionBlob(txBlob)
 	if err != nil {
 		return nil, err
 	}
-	signers, okSigners := tx["Signers"].([]any)
-
-	if okSigners && len(signers) > 0 {
-		for _, sig := range signers {
-			signer := sig.(map[string]any)
-			signerData := signer["Signer"].(map[string]any)
-			if signerData["SigningPubKey"] == "" && signerData["TxnSignature"] == "" {
-				return nil, ErrSignerDataIsEmpty
-			}
-		}
+	signingType, err := clientinternal.InspectSignedTransaction(tx, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := clientinternal.InspectSignedBatchInners(tx); err != nil {
+		return nil, err
+	}
+	if signingType != clientinternal.MultiSignedTransaction {
+		return nil, ErrTransactionNotMultisigned
 	}
 
 	return c.submitMultisignedRequest(&requests.SubmitMultisignedRequest{
 		Tx:       tx,
-		FailHard: failHard,
+		FailHard: clientinternal.SubmissionFailHard(tx, failHard),
 	})
 }
 
-// Autofill fills in the missing fields in a transaction.
+// Autofill fills missing fields in a transaction. It commits all changes to the
+// caller's map only after autofill succeeds. If autofill returns an error, the
+// caller's map is unchanged.
 func (c *Client) Autofill(tx *transaction.FlatTransaction) error {
-	if err := c.setValidTransactionAddresses(tx); err != nil {
+	if tx == nil || *tx == nil {
+		return ErrNilTransaction
+	}
+	working := transaction.FlatTransaction(clientinternal.CloneTransaction(*tx))
+	if err := c.autofill(context.Background(), &working, 0); err != nil {
+		return err
+	}
+	clientinternal.ReplaceTransactionContents(*tx, working)
+	return nil
+}
+
+func (c *Client) autofill(ctx context.Context, tx *transaction.FlatTransaction, nSigners uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := tx.RequireTransactionType(); err != nil {
+		return err
+	}
+	if err := tx.NormalizeFlags(); err != nil {
+		return err
+	}
+	if err := c.checkPaymentAmounts(tx); err != nil {
 		return err
 	}
 
-	err := c.setTransactionFlags(tx)
+	identity, err := c.ensureNetworkIdentity(ctx)
 	if err != nil {
 		return err
 	}
-
-	if _, ok := (*tx)["NetworkID"]; !ok {
-		if c.NetworkID != 0 {
-			(*tx)["NetworkID"] = c.NetworkID
-		}
+	if err := c.setValidTransactionAddresses(tx); err != nil {
+		return err
+	}
+	if err := clientinternal.ApplyNetworkIDPolicy(*tx, identity); err != nil {
+		return err
 	}
 	if _, ok := (*tx)["Sequence"]; !ok {
-		err := c.setTransactionNextValidSequenceNumber(tx)
-		if err != nil {
+		if err := c.setTransactionNextValidSequenceNumber(ctx, tx); err != nil {
 			return err
 		}
 	}
 	if _, ok := (*tx)["Fee"]; !ok {
-		err := c.calculateFeePerTransactionType(tx, 0)
-		if err != nil {
+		if err := c.calculateFeePerTransactionType(ctx, tx, nSigners); err != nil {
 			return err
 		}
 	}
 	if _, ok := (*tx)["LastLedgerSequence"]; !ok {
-		err := c.setLastLedgerSequence(tx)
-		if err != nil {
+		if err := c.setLastLedgerSequence(ctx, tx); err != nil {
 			return err
 		}
 	}
-	if txType, ok := (*tx)["TransactionType"].(string); ok {
-		if acc, ok := (*tx)["Account"].(types.Address); txType == transaction.AccountDeleteTx.String() && ok {
-			err := c.checkAccountDeleteBlockers(acc)
-			if err != nil {
-				return err
-			}
+	txType := tx.TxType()
+	if txType == transaction.AccountDeleteTx {
+		accountAddress, ok := typecheck.ToString((*tx)["Account"])
+		if !ok {
+			return ErrMissingAccountInTransaction
 		}
-		if txType == transaction.PaymentTx.String() {
-			err := c.checkPaymentAmounts(tx)
-			if err != nil {
-				return err
-			}
+		if err := c.checkAccountDeleteBlockers(ctx, types.Address(accountAddress)); err != nil {
+			return err
 		}
-		if txType == transaction.BatchTx.String() {
-			err := c.autofillRawTransactions(tx)
-			if err != nil {
-				return err
-			}
+	}
+	if txType == transaction.BatchTx {
+		if err := c.autofillRawTransactions(ctx, tx); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -284,113 +429,76 @@ func (c *Client) Autofill(tx *transaction.FlatTransaction) error {
 // This function is used to fill in the missing fields in a multisigned transaction.
 // It fills in the missing fields in the transaction and calculates the fee per number of signers.
 func (c *Client) AutofillMultisigned(tx *transaction.FlatTransaction, nSigners uint64) error {
-	err := c.Autofill(tx)
-	if err != nil {
+	if tx == nil || *tx == nil {
+		return ErrNilTransaction
+	}
+	working := transaction.FlatTransaction(clientinternal.CloneTransaction(*tx))
+	if err := c.autofill(context.Background(), &working, nSigners); err != nil {
 		return err
 	}
-
-	err = c.calculateFeePerTransactionType(tx, nSigners)
-	if err != nil {
-		return err
-	}
-
+	clientinternal.ReplaceTransactionContents(*tx, working)
 	return nil
 }
 
 // FaucetProvider returns the faucet provider for the client.
-func (c *Client) FaucetProvider() common.FaucetProvider {
+func (c *Client) FaucetProvider() commonconstants.FaucetProvider {
 	return c.cfg.faucetProvider
 }
 
-// FundWallet funds a wallet with the client's faucet provider.
+// FundWallet funds a wallet with the client's faucet provider and polls the
+// validated ledger until the account's balance increases. It returns
+// ErrFundWalletBalanceNotUpdated if the balance fails to update within the
+// poll window.
 func (c *Client) FundWallet(wallet *wallet.Wallet) error {
 	if wallet.ClassicAddress == "" {
 		return ErrCannotFundWalletWithoutClassicAddress
 	}
 
-	err := c.cfg.faucetProvider.FundWallet(wallet.ClassicAddress)
-	if err != nil {
+	// Starting balance. An error here (typically actNotFound for a
+	// brand-new account) is treated as a zero balance so polling can still
+	// detect the faucet deposit.
+	startBalance, err := c.getXrpDropsBalance(wallet.ClassicAddress, common.Validated)
+	if err != nil && !isFundWalletActNotFound(err) {
 		return err
 	}
 
-	return nil
+	if err := c.cfg.faucetProvider.FundWallet(wallet.ClassicAddress); err != nil {
+		return err
+	}
+
+	for range fundWalletMaxAttempts {
+		time.Sleep(fundWalletPollInterval)
+		balance, err := c.getXrpDropsBalance(wallet.ClassicAddress, common.Validated)
+		if err != nil {
+			if isFundWalletActNotFound(err) {
+				continue
+			}
+			return err
+		}
+		if balance > startBalance {
+			return nil
+		}
+	}
+
+	return ErrFundWalletBalanceNotUpdated
 }
 
-func (c *Client) autofillRawTransactions(tx *transaction.FlatTransaction) error {
-	needsNetworkID, err := c.txNeedsNetworkID()
-	if err != nil {
-		return err
-	}
+func isFundWalletActNotFound(err error) bool {
+	var clientErr *ClientError
+	return errors.As(err, &clientErr) && clientErr.ErrorString == actNotFound
+}
 
-	rawTxs, ok := (*tx)["RawTransactions"].([]map[string]any)
-	if !ok {
-		return ErrRawTransactionsFieldIsNotAnArray
-	}
-
-	accountSeq := make(map[string]uint32, len(rawTxs))
-
-	for _, rawTx := range rawTxs {
-		innerRawTx, ok := rawTx["RawTransaction"].(map[string]any)
-		if !ok {
-			return ErrRawTransactionFieldIsNotAnObject
+func (c *Client) autofillRawTransactions(
+	ctx context.Context,
+	tx *transaction.FlatTransaction,
+) error {
+	return clientinternal.AutofillBatchRawTransactions(*tx, func(accountAddress string) (uint32, error) {
+		var accountInfo account.InfoResponse
+		if err := c.requestResult(ctx, &account.InfoRequest{
+			Account: types.Address(accountAddress),
+		}, &accountInfo); err != nil {
+			return 0, err
 		}
-
-		// Validate `Fee` field
-		if innerRawTx["Fee"] == nil {
-			innerRawTx["Fee"] = "0"
-		} else if innerRawTx["Fee"] != "0" {
-			return types.ErrBatchInnerTransactionInvalid
-		}
-
-		// Validate `SigningPubKey` field
-		if innerRawTx["SigningPubKey"] == nil {
-			innerRawTx["SigningPubKey"] = ""
-		} else if innerRawTx["SigningPubKey"] != "" {
-			return ErrSigningPubKeyFieldMustBeEmpty
-		}
-
-		// Validate `TxnSignature` field
-		if innerRawTx["TxnSignature"] != nil {
-			return ErrTxnSignatureFieldMustBeEmpty
-		}
-		if innerRawTx["Signers"] != nil {
-			return ErrSignersFieldMustBeEmpty
-		}
-
-		// Validate `NetworkID` field
-		if innerRawTx["NetworkID"] == nil && needsNetworkID {
-			innerRawTx["NetworkID"] = c.NetworkID
-		}
-
-		// Validate `Sequence` field
-		if innerRawTx["Sequence"] == nil && innerRawTx["TicketSequence"] == nil {
-
-			acc, ok := innerRawTx["Account"].(string)
-			if !ok {
-				return ErrAccountFieldIsNotAString
-			}
-
-			if accountSeq[acc] != 0 {
-				innerRawTx["Sequence"] = accountSeq[acc]
-				accountSeq[acc]++
-			} else {
-				accountInfo, err := c.GetAccountInfo(&account.InfoRequest{
-					Account: types.Address(acc),
-				})
-				if err != nil {
-					return err
-				}
-				var seq uint32
-				if innerRawTx["Account"] == (*tx)["Account"] {
-					seq = accountInfo.AccountData.Sequence + 1
-				} else {
-					seq = accountInfo.AccountData.Sequence
-				}
-				accountSeq[acc] = seq + 1
-				innerRawTx["Sequence"] = seq
-			}
-		}
-	}
-
-	return nil
+		return accountInfo.AccountData.Sequence, nil
+	})
 }

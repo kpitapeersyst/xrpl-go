@@ -30,6 +30,12 @@ func NewRunner(t *testing.T, client Client, config *RunnerConfig) *Runner {
 	if config == nil {
 		config = NewRunnerConfig()
 	}
+	if config.WalletCount == 0 {
+		config.WalletCount = DefaultWalletCount
+	}
+	if config.MaxRetries == 0 {
+		config.MaxRetries = DefaultMaxRetries
+	}
 	return &Runner{
 		t:      t,
 		config: config,
@@ -85,6 +91,31 @@ func (r *Runner) TestTransaction(flatTx *transaction.FlatTransaction, signer *wa
 	require.NoError(r.t, err)
 	require.Equal(r.t, expectedEngineResult, tx.EngineResult)
 	require.Equal(r.t, hash, tx.Tx["hash"].(string))
+
+	return tx, nil
+}
+
+// TestSuccessfulTransactionAndWait submits a signed transaction and waits for final validation.
+func (r *Runner) TestSuccessfulTransactionAndWait(flatTx *transaction.FlatTransaction, signer *wallet.Wallet, opts *TestTransactionOptions) (*transactions.TxResponse, error) {
+	if opts == nil || !opts.SkipAutofill {
+		if err := r.client.Autofill(flatTx); err != nil {
+			return nil, err
+		}
+	}
+
+	blob, hash, err := signer.Sign(*flatTx)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := r.client.SubmitTxBlobAndWait(blob, true)
+	if err != nil {
+		return nil, err
+	}
+
+	require.True(r.t, tx.Validated)
+	require.Equal(r.t, hash, string(tx.Hash))
+	require.Equal(r.t, transaction.TesSUCCESS.String(), tx.Meta.TransactionResult)
 
 	return tx, nil
 }

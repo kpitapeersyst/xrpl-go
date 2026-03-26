@@ -3,6 +3,7 @@ package websocket
 import (
 	"github.com/Peersyst/xrpl-go/xrpl/currency"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/account"
+	"github.com/Peersyst/xrpl-go/xrpl/queries/amm"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/channel"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/ledger"
@@ -10,6 +11,7 @@ import (
 	"github.com/Peersyst/xrpl-go/xrpl/queries/oracle"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/path"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/server"
+	"github.com/Peersyst/xrpl-go/xrpl/queries/transactions"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/utility"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/vault"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
@@ -68,19 +70,43 @@ func (c *Client) GetAccountObjects(req *account.ObjectsRequest) (*account.Object
 // GetXrpBalance retrieves the XRP balance of a given account address.
 // It returns the balance as a string in XRP (not drops) and any error encountered.
 func (c *Client) GetXrpBalance(address types.Address) (string, error) {
+	return c.getXrpBalance(address, nil)
+}
+
+// GetXrpBalanceValidated retrieves the XRP balance of a given account address
+// from the most recently validated ledger. It returns the balance as a string
+// in XRP (not drops) and any error encountered.
+func (c *Client) GetXrpBalanceValidated(address types.Address) (string, error) {
+	return c.getXrpBalance(address, common.Validated)
+}
+
+// GetXrpDropsBalanceValidated retrieves the XRP balance of a given account
+// address from the most recently validated ledger in drops. Prefer this over
+// GetXrpBalanceValidated when callers need integer drops (avoids a round-trip
+// through a decimal XRP string).
+func (c *Client) GetXrpDropsBalanceValidated(address types.Address) (types.XRPCurrencyAmount, error) {
+	return c.getXrpDropsBalance(address, common.Validated)
+}
+
+func (c *Client) getXrpBalance(address types.Address, ledgerIndex common.LedgerSpecifier) (string, error) {
+	balance, err := c.getXrpDropsBalance(address, ledgerIndex)
+	if err != nil {
+		return "", err
+	}
+	return currency.DropsToXrp(balance.String())
+}
+
+// getXrpDropsBalance returns the account's XRP balance in drops at the given
+// ledger specifier. A nil ledgerIndex lets rippled apply its default.
+func (c *Client) getXrpDropsBalance(address types.Address, ledgerIndex common.LedgerSpecifier) (types.XRPCurrencyAmount, error) {
 	res, err := c.GetAccountInfo(&account.InfoRequest{
-		Account: address,
+		Account:     address,
+		LedgerIndex: ledgerIndex,
 	})
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-
-	xrpBalance, err := currency.DropsToXrp(res.AccountData.Balance.String())
-	if err != nil {
-		return "", err
-	}
-
-	return xrpBalance, nil
+	return res.AccountData.Balance, nil
 }
 
 // GetAccountLines retrieves the lines associated with an account on the XRP Ledger.
@@ -196,6 +222,30 @@ func (c *Client) GetChannelVerify(req *channel.VerifyRequest) (*channel.VerifyRe
 		return nil, err
 	}
 	return &acr, nil
+}
+
+// Transaction queries
+
+// Simulate executes an unsigned transaction as a dry run without submitting it
+// to the network. Results reflect current ledger state and do not guarantee the
+// outcome of a later submission.
+func (c *Client) Simulate(req *transactions.SimulateRequest) (*transactions.SimulateResponse, error) {
+	networkID, _ := c.NetworkIdentity()
+	if err := req.ValidateNetworkID(networkID); err != nil {
+		return nil, err
+	}
+	res, err := c.Request(req)
+	if err != nil {
+		return nil, err
+	}
+	var response transactions.SimulateResponse
+	if err := res.GetResult(&response); err != nil {
+		return nil, err
+	}
+	if err := response.ValidateForRequest(req); err != nil {
+		return nil, err
+	}
+	return &response, nil
 }
 
 // Ledger queries
@@ -446,6 +496,23 @@ func (c *Client) GetServerInfo(req *server.InfoRequest) (*server.InfoResponse, e
 	return &sir, err
 }
 
+// GetServerDefinitions retrieves the serialization definitions supported by the server.
+// A request hash that matches the server's definitions produces a hash-only response.
+func (c *Client) GetServerDefinitions(req *server.DefinitionsRequest) (*server.DefinitionsResponse, error) {
+	res, err := c.Request(req)
+	if err != nil {
+		return nil, err
+	}
+	var response server.DefinitionsResponse
+	if err := res.GetResult(&response); err != nil {
+		return nil, err
+	}
+	if err := response.ValidateForRequest(req); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // GetAllFeatures retrieves information about all features supported by the server.
 // It takes a FeatureAllRequest as input and returns a FeatureAllResponse,
 // along with any error encountered.
@@ -537,6 +604,24 @@ func (c *Client) GetAggregatePrice(req *oracle.GetAggregatePriceRequest) (*oracl
 		return nil, err
 	}
 	var lr oracle.GetAggregatePriceResponse
+	err = res.GetResult(&lr)
+	if err != nil {
+		return nil, err
+	}
+	return &lr, nil
+}
+
+// AMM queries
+
+// GetAMMInfo retrieves information about an AMM instance.
+// It takes an InfoRequest as input and returns an InfoResponse,
+// along with any error encountered.
+func (c *Client) GetAMMInfo(req *amm.InfoRequest) (*amm.InfoResponse, error) {
+	res, err := c.Request(req)
+	if err != nil {
+		return nil, err
+	}
+	var lr amm.InfoResponse
 	err = res.GetResult(&lr)
 	if err != nil {
 		return nil, err

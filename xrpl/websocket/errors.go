@@ -3,45 +3,95 @@ package websocket
 import (
 	"errors"
 	"fmt"
+
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 )
 
 const (
 	// txnNotFound is the error message returned by the xrpl node when requesting for a not found transaction.
 	txnNotFound = "txnNotFound"
+	// actNotFound is the error message returned by the xrpl node when requesting for a not found account.
+	actNotFound = "actNotFound"
 )
 
 var (
 	// transaction
 
-	// ErrMissingTxSignatureOrSigningPubKey is returned when a transaction lacks both TxSignature and SigningPubKey.
-	ErrMissingTxSignatureOrSigningPubKey = errors.New("transaction must include either TxSignature or SigningPubKey")
-	// ErrMissingLastLedgerSequenceInTransaction is returned when LastLedgerSequence is missing from a transaction.
+	// ErrMissingTxSignatureOrSigningPubKey is returned when a transaction has no complete signing form.
+	ErrMissingTxSignatureOrSigningPubKey = errors.New("transaction must include a complete TxnSignature/SigningPubKey or Signers form")
+	// ErrInvalidSignedTransaction is returned when signing fields are malformed, incomplete, empty, or mixed.
+	ErrInvalidSignedTransaction = clientinternal.ErrInvalidSignedTransaction
+	// ErrNilTransaction is returned when a nil transaction is submitted or autofilled.
+	ErrNilTransaction = errors.New("transaction must not be nil")
+	// ErrTransactionNotMultisigned is returned when SubmitMultisigned receives a transaction in another signing form.
+	ErrTransactionNotMultisigned = clientinternal.ErrTransactionNotMultisigned
+	// ErrSignerDataIsEmpty is a compatibility alias for ErrTransactionNotMultisigned.
+	//
+	// Deprecated: Use ErrTransactionNotMultisigned.
+	ErrSignerDataIsEmpty = ErrTransactionNotMultisigned
+	// ErrMissingLastLedgerSequenceInTransaction is returned when a reliable-submission transaction does not contain LastLedgerSequence.
 	ErrMissingLastLedgerSequenceInTransaction = errors.New("missing LastLedgerSequence in transaction")
 	// ErrMissingWallet is returned when a wallet is required but not provided for an unsigned transaction.
 	ErrMissingWallet = errors.New("wallet must be provided when submitting an unsigned transaction")
-	// ErrTransactionNotFound is returned when a transaction cannot be found.
-	ErrTransactionNotFound = errors.New("transaction not found")
+	// ErrPreliminaryResult indicates a malformed preliminary submit result.
+	ErrPreliminaryResult = clientinternal.ErrPreliminaryResult
+	// ErrTransactionExpired indicates ledger-driven expiry after LastLedgerSequence.
+	ErrTransactionExpired = clientinternal.ErrTransactionExpired
+	// ErrFinalityTransport indicates repeated transport failures during monitoring.
+	ErrFinalityTransport = clientinternal.ErrFinalityTransport
+	// ErrInvalidPollInterval indicates a negative reliable-submission poll interval.
+	ErrInvalidPollInterval = clientinternal.ErrInvalidPollInterval
+	// ErrInvalidMaxRetries indicates a non-positive reliable-submission retry limit.
+	ErrInvalidMaxRetries = clientinternal.ErrInvalidMaxRetries
+	// ErrInvalidLastLedgerSequence indicates a zero reliable-submission ledger boundary.
+	ErrInvalidLastLedgerSequence = clientinternal.ErrInvalidLastLedgerSequence
 	// ErrMissingAccountInTransaction is returned when the Account field is missing from a transaction.
 	ErrMissingAccountInTransaction = errors.New("missing Account in transaction")
-	// ErrTransactionTypeMissing is returned when the transaction type is missing from a transaction.
-	ErrTransactionTypeMissing = errors.New("transaction type is missing in transaction")
 	// ErrInvalidFulfillmentLength is returned when the fulfillment length is invalid.
 	ErrInvalidFulfillmentLength = errors.New("invalid fulfillment length")
 
 	// fields
 
+	// ErrAddressFieldIsNotAString is returned when an address field has the wrong Go type.
+	ErrAddressFieldIsNotAString = clientinternal.ErrAddressFieldIsNotAString
+	// ErrTagFieldIsNotAUint32 is returned when an explicit transaction tag has the wrong Go type.
+	ErrTagFieldIsNotAUint32 = clientinternal.ErrTagFieldIsNotAUint32
+	// ErrInvalidAddress is returned when an autofilled address is neither classic nor an X-address.
+	ErrInvalidAddress = clientinternal.ErrInvalidAddress
+	// ErrMismatchedTag is returned when an explicit transaction tag conflicts with an X-address tag.
+	ErrMismatchedTag = clientinternal.ErrMismatchedTag
+	// ErrAccountIDTagNotAllowed is returned when a tagless AccountID field receives a tagged X-address.
+	ErrAccountIDTagNotAllowed = clientinternal.ErrAccountIDTagNotAllowed
 	// ErrRawTransactionsFieldIsNotAnArray is returned when the RawTransactions field is not an array type.
-	ErrRawTransactionsFieldIsNotAnArray = errors.New("field RawTransactions must be an array")
+	ErrRawTransactionsFieldIsNotAnArray = clientinternal.ErrRawTransactionsFieldIsNotAnArray
 	// ErrRawTransactionFieldIsNotAnObject is returned when the RawTransaction field is not an object type.
-	ErrRawTransactionFieldIsNotAnObject = errors.New("field RawTransaction must be an object")
+	ErrRawTransactionFieldIsNotAnObject = clientinternal.ErrRawTransactionFieldIsNotAnObject
+	// ErrBatchRawTransactionsCount is returned when a Batch does not contain 2 through 8 inner transactions.
+	ErrBatchRawTransactionsCount = clientinternal.ErrBatchRawTransactionsCount
 	// ErrSigningPubKeyFieldMustBeEmpty is returned when the SigningPubKey field should be empty but isn't.
-	ErrSigningPubKeyFieldMustBeEmpty = errors.New("field SigningPubKey must be empty")
-	// ErrTxnSignatureFieldMustBeEmpty is returned when the TxnSignature field should be empty but isn't.
-	ErrTxnSignatureFieldMustBeEmpty = errors.New("field TxnSignature must be empty")
-	// ErrSignersFieldMustBeEmpty is returned when the Signers field should be empty but isn't.
-	ErrSignersFieldMustBeEmpty = errors.New("field Signers must be empty")
+	ErrSigningPubKeyFieldMustBeEmpty = clientinternal.ErrSigningPubKeyFieldMustBeEmpty
+	// ErrTxnSignatureFieldMustBeEmpty is returned when the TxnSignature field should be absent but isn't.
+	ErrTxnSignatureFieldMustBeEmpty = clientinternal.ErrTxnSignatureFieldMustBeEmpty
+	// ErrSignersFieldMustBeEmpty is returned when the Signers field should be absent but isn't.
+	ErrSignersFieldMustBeEmpty = clientinternal.ErrSignersFieldMustBeEmpty
+	// ErrLastLedgerSequenceFieldMustBeAbsent is returned when an inner Batch includes LastLedgerSequence.
+	ErrLastLedgerSequenceFieldMustBeAbsent = clientinternal.ErrLastLedgerSequenceFieldMustBeAbsent
 	// ErrAccountFieldIsNotAString is returned when the Account field is not a string type.
-	ErrAccountFieldIsNotAString = errors.New("field Account must be a string")
+	ErrAccountFieldIsNotAString = clientinternal.ErrAccountFieldIsNotAString
+	// ErrNetworkIDFieldIsNotAUint32 is returned when the NetworkID field is set but not a uint32.
+	ErrNetworkIDFieldIsNotAUint32 = clientinternal.ErrNetworkIDFieldIsNotAUint32
+	// ErrNetworkIDFieldMismatch is returned when the NetworkID field does not match the expected NetworkID.
+	ErrNetworkIDFieldMismatch = clientinternal.ErrNetworkIDFieldMismatch
+	// ErrNetworkIDFieldUnexpected is returned when NetworkID must be omitted for the target network.
+	ErrNetworkIDFieldUnexpected = clientinternal.ErrNetworkIDFieldUnexpected
+	// ErrNetworkIDUnavailable is returned when server identity discovery did not produce a network ID.
+	ErrNetworkIDUnavailable = clientinternal.ErrNetworkIDUnavailable
+	// ErrBuildVersionUnavailable is returned when restricted-network policy cannot be determined without a build version.
+	ErrBuildVersionUnavailable = clientinternal.ErrBuildVersionUnavailable
+	// ErrInvalidBuildVersion is returned when the discovered rippled version cannot be compared.
+	ErrInvalidBuildVersion = clientinternal.ErrInvalidBuildVersion
+	// ErrNetworkIDOverrideMismatch is returned when an override differs from server_info.
+	ErrNetworkIDOverrideMismatch = clientinternal.ErrNetworkIDOverrideMismatch
 	// ErrRawTransactionsFieldMissing is returned when the RawTransactions field is missing from a Batch transaction.
 	ErrRawTransactionsFieldMissing = errors.New("RawTransactions field missing from Batch transaction")
 	// ErrRawTransactionFieldMissing is returned when the RawTransaction field is missing from a wrapper.
@@ -57,16 +107,22 @@ var (
 	ErrNotConnectedToServer = errors.New("not connected to server")
 	// ErrRequestTimedOut indicates that a request to the server timed out.
 	ErrRequestTimedOut = errors.New("request timed out")
-	// ErrSignerDataIsEmpty is returned when signer data is empty or missing.
-	ErrSignerDataIsEmpty = errors.New("signer data is empty")
+	// ErrDisconnected indicates that a pending request could not receive a response because the connection closed.
+	ErrDisconnected = errors.New("websocket disconnected before response")
 
 	// wallet
 
 	// ErrCannotFundWalletWithoutClassicAddress is returned when attempting to fund a wallet without a classic address.
 	ErrCannotFundWalletWithoutClassicAddress = errors.New("cannot fund a wallet without a classic address")
+	// ErrFundWalletBalanceNotUpdated is returned when the wallet balance does not update on the validated ledger after polling.
+	ErrFundWalletBalanceNotUpdated = errors.New("fund wallet: balance did not update on validated ledger after polling")
 
 	// fees
 
+	// ErrInvalidFeeValue is returned when fee configuration is not a finite, non-negative decimal value.
+	ErrInvalidFeeValue = clientinternal.ErrInvalidFeeValue
+	// ErrFeeHasTooManyDecimals is returned when an XRP fee cannot be represented as whole drops.
+	ErrFeeHasTooManyDecimals = clientinternal.ErrFeeHasTooManyDecimals
 	// ErrCouldNotGetBaseFeeXrp is returned when BaseFeeXrp cannot be retrieved from ServerInfo.
 	ErrCouldNotGetBaseFeeXrp = errors.New("get fee xrp: could not get BaseFeeXrp from ServerInfo")
 	// ErrCouldNotFetchOwnerReserve is returned when the owner reserve fee cannot be fetched.
@@ -88,12 +144,14 @@ var (
 	// payment
 
 	// ErrAmountAndDeliverMaxMustBeIdentical is returned when Amount and DeliverMax fields are not identical.
-	ErrAmountAndDeliverMaxMustBeIdentical = errors.New("payment transaction: Amount and DeliverMax fields must be identical when both are provided")
+	ErrAmountAndDeliverMaxMustBeIdentical = clientinternal.ErrAmountAndDeliverMaxMustBeIdentical
 
 	// connection
 
 	// ErrNotConnected is returned when attempting to perform operations on a connection that is not established.
 	ErrNotConnected = errors.New("connection is not connected")
+	// ErrAlreadyConnected is returned when attempting to replace a live connection.
+	ErrAlreadyConnected = errors.New("connection is already connected")
 )
 
 // Dynamic errors
@@ -121,11 +179,20 @@ func (e ErrUnknownStreamType) Error() string {
 // ErrMaxReconnectionAttemptsReached is returned when maximum reconnection attempts are reached.
 type ErrMaxReconnectionAttemptsReached struct {
 	Attempts int
+	Err      error
 }
 
-// Error implements the error interface for ErrMaxReconnectionAttemptsReached
+// Error implements the error interface for ErrMaxReconnectionAttemptsReached.
 func (e ErrMaxReconnectionAttemptsReached) Error() string {
-	return fmt.Sprintf("max reconnection attempts reached: %d", e.Attempts)
+	if e.Err == nil {
+		return fmt.Sprintf("max reconnection attempts reached: %d", e.Attempts)
+	}
+	return fmt.Sprintf("max reconnection attempts reached: %d: %v", e.Attempts, e.Err)
+}
+
+// Unwrap returns the last connection or network identity failure.
+func (e ErrMaxReconnectionAttemptsReached) Unwrap() error {
+	return e.Err
 }
 
 // ErrFailedToParseFee is returned when fee parsing fails.

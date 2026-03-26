@@ -8,6 +8,12 @@ import (
 var (
 	// ErrDestinationAccountConflict is returned when the Destination matches the Account.
 	ErrDestinationAccountConflict = errors.New("destination cannot be the same as the Account")
+	// ErrTransactionTypeMissing is returned when the TransactionType field is absent
+	// or not a string.
+	ErrTransactionTypeMissing = errors.New("transaction type is missing or not a string")
+	// ErrInvalidFlagsValue is returned when the Flags field is present but cannot
+	// be coerced to a uint32.
+	ErrInvalidFlagsValue = errors.New("invalid Flags: must be a non-negative integer that fits in uint32 ([0, 4294967295])")
 	// ErrInvalidAccount is returned when the Account field does not meet XRPL address standards.
 	ErrInvalidAccount = errors.New("invalid xrpl address for Account")
 	// ErrInvalidDelegate is returned when the Delegate field does not meet XRPL address standards.
@@ -126,6 +132,12 @@ var (
 	ErrInvalidSignerEntries = errors.New("invalid number of signer entries")
 	// ErrInvalidWalletLocator is returned when a SignerEntry's WalletLocator is not a valid hexadecimal string.
 	ErrInvalidWalletLocator = errors.New("invalid WalletLocator in SignerEntry, must be a hexadecimal string")
+	// ErrDuplicateSignerAccount is returned when a signer account appears more than once.
+	ErrDuplicateSignerAccount = errors.New("duplicate signer account in SignerEntries")
+	// ErrSignerAccountMatchesAccount is returned when a signer account matches the transaction account.
+	ErrSignerAccountMatchesAccount = errors.New("signer account must not match transaction account")
+	// ErrInvalidSignerWeight is returned when a SignerEntry's SignerWeight is invalid.
+	ErrInvalidSignerWeight = errors.New("invalid SignerWeight in SignerEntry")
 	// ErrSignerQuorumGreaterThanSumOfSignerWeights is returned when SignerQuorum exceeds sum of all SignerWeights.
 	ErrSignerQuorumGreaterThanSumOfSignerWeights = errors.New("signerQuorum must be less than or equal to the sum of all SignerWeights")
 	// ErrInvalidQuorumAndEntries is returned when SignerEntries is non-empty while SignerQuorum is zero.
@@ -178,8 +190,8 @@ var (
 	// ErrEmptyNFTokenOffers is returned when the NFTokenOffers array contains no entries.
 	ErrEmptyNFTokenOffers = errors.New("the NFTokenOffers array must have at least one entry")
 
-	// ErrInvalidNFTokenID is returned when the NFTokenID is not a hexadecimal.
-	ErrInvalidNFTokenID = errors.New("invalid NFTokenID, must be a hexadecimal string")
+	// ErrInvalidNFTokenID is returned when the NFTokenID is not a 256-bit hexadecimal value.
+	ErrInvalidNFTokenID = errors.New("invalid NFTokenID, must be a 64-character hexadecimal string")
 
 	// ErrNFTokenBrokerFeeZero is returned when NFTokenBrokerFee is zero.
 	ErrNFTokenBrokerFeeZero = errors.New("nftoken accept offer: NFTokenBrokerFee cannot be zero")
@@ -208,24 +220,32 @@ var (
 	// ErrHolderAccountConflict is returned when the holder account is the same as the issuing account.
 	ErrHolderAccountConflict = errors.New("holder must be different from the account")
 
-	// ErrMPTIssuanceCreateMutableFlagsZero is returned when MutableFlags is set to zero in MPTokenIssuanceCreate.
-	ErrMPTIssuanceCreateMutableFlagsZero = errors.New("mptoken issuance create: MutableFlags cannot be zero")
+	// ErrMPTIssuanceCreateMaximumAmountInvalid is returned when MaximumAmount is outside 1..2^63-1.
+	ErrMPTIssuanceCreateMaximumAmountInvalid = errors.New("mptoken issuance create: MaximumAmount must be between 1 and 9223372036854775807")
+	// ErrMPTIssuanceCreateImmutableFlagsZero is returned when ImmutableFlags is set to zero in MPTokenIssuanceCreate.
+	ErrMPTIssuanceCreateImmutableFlagsZero = errors.New("mptoken issuance create: ImmutableFlags cannot be zero")
+	// ErrMPTIssuanceCreateInvalidImmutableFlags is returned when ImmutableFlags contains unsupported bits.
+	ErrMPTIssuanceCreateInvalidImmutableFlags = errors.New("mptoken issuance create: ImmutableFlags contains unsupported flags")
+	// ErrMPTIssuanceCreateTransferFeeWithConfidentialBalance is returned when a non-zero transfer fee is used with confidential balances.
+	ErrMPTIssuanceCreateTransferFeeWithConfidentialBalance = errors.New("mptoken issuance create: TransferFee cannot be non-zero when TfMPTCanHoldConfidentialBalance is set")
 	// ErrMPTIssuanceCreateDomainIDInvalid is returned when DomainID is not a valid 64-character hexadecimal string.
 	ErrMPTIssuanceCreateDomainIDInvalid = errors.New("mptoken issuance create: DomainID must be a valid 64-character hexadecimal string")
 	// ErrMPTIssuanceCreateDomainIDRequiresRequireAuth is returned when DomainID is set without enabling TfMPTRequireAuth flag.
 	ErrMPTIssuanceCreateDomainIDRequiresRequireAuth = errors.New("mptoken issuance create: DomainID requires TfMPTRequireAuth flag to be set")
-	// ErrMPTIssuanceSetEmpty is returned when no operation is specified (no Flags, Holder, or DynamicMPT fields).
-	ErrMPTIssuanceSetEmpty = errors.New("mptoken issuance set: at least one of Flags, Holder, MutableFlags, MPTokenMetadata, TransferFee, or DomainID must be set")
-	// ErrMPTIssuanceSetHolderMutuallyExclusive is returned when Holder is set together with DynamicMPT fields.
-	ErrMPTIssuanceSetHolderMutuallyExclusive = errors.New("mptoken issuance set: Holder is mutually exclusive with MutableFlags/MPTokenMetadata/TransferFee/DomainID")
-	// ErrMPTIssuanceSetFlagsMutuallyExclusive is returned when non-zero Flags are set together with DynamicMPT fields.
-	ErrMPTIssuanceSetFlagsMutuallyExclusive = errors.New("mptoken issuance set: Flags is mutually exclusive with MutableFlags/MPTokenMetadata/TransferFee")
-	// ErrMPTIssuanceSetMutableFlagsZero is returned when MutableFlags is set to zero.
-	ErrMPTIssuanceSetMutableFlagsZero = errors.New("mptoken issuance set: MutableFlags cannot be zero")
-	// ErrMPTIssuanceSetMutableFlagsConflict is returned when MutableFlags has both set and clear for the same flag.
-	ErrMPTIssuanceSetMutableFlagsConflict = errors.New("mptoken issuance set: cannot set and clear the same flag simultaneously")
-	// ErrMPTIssuanceSetTransferFeeWithClearCanTransfer is returned when a non-zero TransferFee is set together with tmfMPTClearCanTransfer.
-	ErrMPTIssuanceSetTransferFeeWithClearCanTransfer = errors.New("mptoken issuance set: non-zero TransferFee cannot be set together with tmfMPTClearCanTransfer")
+	// ErrMPTIssuanceSetInvalidFlags is returned when Flags contains unsupported bits.
+	ErrMPTIssuanceSetInvalidFlags = errors.New("mptoken issuance set: Flags contains unsupported flags")
+	// ErrMPTIssuanceSetEmpty is returned when no operation is specified.
+	ErrMPTIssuanceSetEmpty = errors.New("mptoken issuance set: at least one of Flags, ImmutableFlags, MPTokenMetadata, TransferFee, or DomainID must be set")
+	// ErrMPTIssuanceSetHolderMutuallyExclusive is returned when Holder is set together with a mutation or DomainID.
+	ErrMPTIssuanceSetHolderMutuallyExclusive = errors.New("mptoken issuance set: Holder is mutually exclusive with capability flags/ImmutableFlags/MPTokenMetadata/TransferFee/DomainID")
+	// ErrMPTIssuanceSetFlagsMutuallyExclusive is returned when lock or unlock is set together with a mutation.
+	ErrMPTIssuanceSetFlagsMutuallyExclusive = errors.New("mptoken issuance set: lock or unlock is mutually exclusive with capability flags/ImmutableFlags/MPTokenMetadata/TransferFee")
+	// ErrMPTIssuanceSetImmutableFlagsZero is returned when ImmutableFlags is set to zero.
+	ErrMPTIssuanceSetImmutableFlagsZero = errors.New("mptoken issuance set: ImmutableFlags cannot be zero")
+	// ErrMPTIssuanceSetInvalidImmutableFlags is returned when ImmutableFlags contains unsupported bits.
+	ErrMPTIssuanceSetInvalidImmutableFlags = errors.New("mptoken issuance set: ImmutableFlags contains unsupported flags")
+	// ErrMPTIssuanceSetTransferFeeWithConfidentialBalance is returned when a non-zero transfer fee is enabled with confidential balances.
+	ErrMPTIssuanceSetTransferFeeWithConfidentialBalance = errors.New("mptoken issuance set: TransferFee cannot be non-zero when TfMPTSetCanHoldConfidentialBalance is set")
 	// ErrMPTIssuanceSetDomainIDInvalid is returned when DomainID is not a valid 64-character hexadecimal string (and not empty).
 	ErrMPTIssuanceSetDomainIDInvalid = errors.New("mptoken issuance set: DomainID must be a valid 64-character hexadecimal string or empty")
 
@@ -235,11 +255,19 @@ var (
 	ErrEscrowFinishMissingOwner = errors.New("escrow finish: missing owner")
 	// ErrEscrowFinishMissingOfferSequence is returned when the OfferSequence is zero in an EscrowFinish transaction.
 	ErrEscrowFinishMissingOfferSequence = errors.New("escrow finish: missing offer sequence")
+	// ErrEscrowFinishInvalidCondition is returned when the Condition field is set but not a valid hexadecimal string.
+	ErrEscrowFinishInvalidCondition = errors.New("escrow finish: Condition must be a valid hexadecimal string")
+	// ErrEscrowFinishInvalidFulfillment is returned when the Fulfillment field is set but not a valid hexadecimal string.
+	ErrEscrowFinishInvalidFulfillment = errors.New("escrow finish: Fulfillment must be a valid hexadecimal string")
 
 	// ErrEscrowCreateInvalidDestinationAddress is returned when the destination address for EscrowCreate is invalid.
 	ErrEscrowCreateInvalidDestinationAddress = errors.New("escrow create: invalid destination address")
+	// ErrEscrowCreateZeroAmount is returned when the Amount field is zero.
+	ErrEscrowCreateZeroAmount = errors.New("escrow create: amount must be non-zero")
 	// ErrEscrowCreateNoConditionOrFinishAfterSet is returned when both Condition and FinishAfter are unset.
 	ErrEscrowCreateNoConditionOrFinishAfterSet = errors.New("escrow create: either Condition or FinishAfter must be specified")
+	// ErrEscrowCreateInvalidCondition is returned when the Condition field is set but not a valid hexadecimal string.
+	ErrEscrowCreateInvalidCondition = errors.New("escrow create: Condition must be a valid hexadecimal string")
 
 	// ErrEscrowCancelMissingOwner indicates the Owner field is missing when canceling an escrow.
 	ErrEscrowCancelMissingOwner = errors.New("escrow cancel: missing owner")
@@ -272,8 +300,8 @@ var (
 
 	// ErrDelegateSetAuthorizeAccountConflict is returned when the Authorize account matches the Account.
 	ErrDelegateSetAuthorizeAccountConflict = errors.New("authorize account cannot be the same as the Account")
-	// ErrDelegateSetPermissionMalformed is returned when the Permissions array is empty or malformed.
-	ErrDelegateSetPermissionMalformed = errors.New("permissions array is required and cannot be empty")
+	// ErrDelegateSetPermissionMalformed is returned when the Permissions array is absent.
+	ErrDelegateSetPermissionMalformed = errors.New("permissions array is required")
 	// ErrDelegateSetPermissionsMaxLength is returned when the Permissions array exceeds the maximum length.
 	ErrDelegateSetPermissionsMaxLength = errors.New("permissions array cannot exceed maximum length")
 	// ErrDelegateSetEmptyPermissionValue is returned when a permission value is empty or undefined.
@@ -292,10 +320,22 @@ var (
 
 	// ErrClawbackMissingAmount is returned when the Amount field is not set.
 	ErrClawbackMissingAmount = errors.New("clawback: missing field Amount")
-	// ErrClawbackInvalidAmount is returned when the Amount is not a valid issued currency.
+	// ErrClawbackInvalidAmount is returned when Amount is not a valid, non-zero issued-currency or MPT amount.
 	ErrClawbackInvalidAmount = errors.New("clawback: invalid Amount")
-	// ErrClawbackSameAccount is returned when the clawback account and the token issuer are the same.
+	// ErrClawbackMPTIssuerMismatch is returned when Account is not the issuer encoded in an MPT issuance ID.
+	ErrClawbackMPTIssuerMismatch = errors.New("clawback: Account must match the issuer encoded in Amount.mpt_issuance_id")
+	// ErrClawbackHolderNotAllowed is returned when Holder is set for an issued-currency clawback.
+	ErrClawbackHolderNotAllowed = errors.New("clawback: Holder must be omitted for an issued-currency Amount")
+	// ErrClawbackMissingHolder is returned when Holder is not set for an MPT clawback.
+	ErrClawbackMissingHolder = errors.New("clawback: Holder is required for an MPT Amount")
+	// ErrClawbackInvalidHolder is returned when Holder is not a valid XRPL address.
+	ErrClawbackInvalidHolder = errors.New("clawback: invalid Holder")
+	// ErrClawbackHolderTagNotAllowed is returned when Holder is an X-address with an embedded tag.
+	ErrClawbackHolderTagNotAllowed = errors.New("clawback: Holder X-address cannot contain a tag")
+	// ErrClawbackSameAccount is returned when an IOU clawback issuer targets itself as the holder.
 	ErrClawbackSameAccount = errors.New("clawback: Account and Amount.issuer cannot be the same")
+	// ErrClawbackSameHolder is returned when an MPT clawback issuer targets itself as the holder.
+	ErrClawbackSameHolder = errors.New("clawback: Account and Holder cannot be the same")
 
 	// check
 
@@ -306,9 +346,10 @@ var (
 
 	// batch
 
-	// ErrBatchRawTransactionsEmpty is returned when the RawTransactions array is empty or nil.
-	// This validates that a batch transaction contains at least one inner transaction to execute.
-	ErrBatchRawTransactionsEmpty = errors.New("rawTransactions must be a non-empty array")
+	// ErrBatchRawTransactionsCount is returned when RawTransactions does not contain 2 through 8 inner transactions.
+	ErrBatchRawTransactionsCount = errors.New("RawTransactions must contain between 2 and 8 transactions")
+	// ErrBatchRawTransactionsEmpty is a compatibility alias for ErrBatchRawTransactionsCount.
+	ErrBatchRawTransactionsEmpty = ErrBatchRawTransactionsCount
 
 	// balance
 
@@ -316,7 +357,6 @@ var (
 	errHighLimitIssuerNotFound       = errors.New("high limit issuer not found")
 	errBalanceCurrencyNotFound       = errors.New("balance currency not found")
 	errInvalidBalanceValue           = errors.New("invalid balance value")
-	errBalanceNotFound               = errors.New("balance not found")
 	errAccountNotFoundForXRPQuantity = errors.New("account not found for XRP quantity")
 
 	// amm
@@ -341,10 +381,29 @@ var (
 
 	// account
 
-	// ErrAccountSetInvalidSetFlag is returned when SetFlag is outside the valid range (1 to 16).
-	ErrAccountSetInvalidSetFlag = errors.New("account set: SetFlag must be an integer between AsfRequireDest (1) and AsfAllowTrustLineClawback (16)")
+	// ErrAccountSetInvalidSetFlag is returned when SetFlag is not a valid AccountSet flag.
+	ErrAccountSetInvalidSetFlag = fmt.Errorf(
+		"account set: SetFlag must be 0 or a valid AccountSet flag (%d-%d, excluding %d reserved for Hooks)",
+		AsfRequireDest, AsfAllowTrustLineLocking, reservedAccountSetFlagHooks,
+	)
+	// ErrAccountSetInvalidClearFlag is returned when ClearFlag is not a valid AccountSet flag.
+	ErrAccountSetInvalidClearFlag = fmt.Errorf(
+		"account set: ClearFlag must be 0 or a valid AccountSet flag (%d-%d, excluding %d reserved for Hooks)",
+		AsfRequireDest, AsfAllowTrustLineLocking, reservedAccountSetFlagHooks,
+	)
+	// ErrAccountSetInvalidTransferRate is returned when TransferRate is outside the valid range.
+	ErrAccountSetInvalidTransferRate = fmt.Errorf(
+		"account set: TransferRate must be 0 or between %d and %d inclusive",
+		MinTransferRate, MaxTransferRate,
+	)
 	// ErrAccountSetInvalidTickSize is returned when TickSize is outside the valid range (0 to 15 inclusive).
-	ErrAccountSetInvalidTickSize = errors.New("account set: TickSize must be an integer between 0 and 15 inclusive")
+	ErrAccountSetInvalidTickSize = fmt.Errorf(
+		"account set: TickSize must be 0 or an integer between %d and %d inclusive",
+		MinTickSize, MaxTickSize,
+	)
+	// ErrAccountSetMutuallyExclusiveFlags is returned when SetFlag and ClearFlag have the same non-zero value.
+	// rippled returns temINVALID in that case.
+	ErrAccountSetMutuallyExclusiveFlags = errors.New("account set: SetFlag and ClearFlag must not be equal")
 
 	// loan
 
