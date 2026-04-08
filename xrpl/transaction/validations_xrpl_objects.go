@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -286,6 +287,28 @@ func IsHex256(input string) bool {
 // A valid ledger entry id is a 256-bit value encoded as hexadecimal.
 func IsLedgerEntryID(input string) bool {
 	return IsHex256(input)
+}
+
+// IsMPTIssuanceID checks if the given hex string is a valid 24-byte MPT issuance ID (48 hex chars).
+func IsMPTIssuanceID(id string) bool {
+	return types.MPTIssuanceID(id).IsValid()
+}
+
+// IsMPTIssuanceIssuer reports whether account is the issuer encoded in an MPT issuance ID.
+// It accepts classic addresses and X-addresses.
+func IsMPTIssuanceIssuer(id string, account types.Address) bool {
+	issuanceID, ok := decodeMPTIssuanceID(id)
+	if !ok {
+		return false
+	}
+
+	accountID, _, err := decodeAddressAccountID(account)
+	if err != nil {
+		return false
+	}
+
+	issuerID := issuanceID[len(issuanceID)-addresscodec.AccountAddressLength:]
+	return bytes.Equal(issuerID, accountID)
 }
 
 // ValidateHexMetadata validates input is non-empty hex string of up to a certain length.
