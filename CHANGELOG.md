@@ -9,36 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### confidential
-
-- Added `confidential/mptcrypto` package with CGo bindings to the XRPLF `mpt-crypto` C library for XLS-96 Confidential MPT Transfers (ElGamal encryption, ZK proofs, Pedersen commitments).
-  - `GenerateKeypair()` creates a new secp256k1 ElGamal keypair (32-byte private key, 33-byte compressed public key).
-  - Platform-specific static libraries vendored for `linux-amd64`, `linux-arm64`, `darwin-amd64`, `darwin-arm64`.
-  - Graceful `!cgo` build tag fallback returning `ErrCgoRequired`.
-- Added `confidential/deps/update.sh` maintainer script for fetching and vendoring `mpt-crypto` static libraries from the XRPLF Conan remote.
-- Added `update-mpt-crypto` GitHub Actions workflow to automatically check for new `mpt-crypto` releases weekly and open a PR with updated vendored dependencies.
-- Added `test-confidential` and `update-mpt-crypto` Makefile targets.
-- Added `confidential/elgamal` package providing a hex-string API for ElGamal keypair generation, encryption, and decryption, wrapping `mptcrypto` CGo bindings for use with XRPL transaction fields.
-  - `GenerateKeypair()`, `GenerateBlindingFactor()`, `Encrypt()`, `Decrypt()` with hex-encoded inputs/outputs.
-  - Sentinel errors with wrapped underlying causes for debuggability.
-- Extended `mptcrypto` with `GenerateBlindingFactor()`, `EncryptAmount()`, and `DecryptAmount()` CGo bindings (with `!cgo` stubs).
-- Extended `mptcrypto` with ZK proof CGo bindings (with `!cgo` stubs):
-  - Context hash functions: `ConvertContextHash()`, `ConvertBackContextHash()`, `SendContextHash()`, `ClawbackContextHash()`.
-  - Pedersen commitment: `PedersenCommitment()`.
-  - Proof generation: `GenerateConvertProof()`, `GenerateConvertBackProof()`, `GenerateSendProof()`, `GenerateClawbackProof()`, `GenerateAmountLinkageProof()`, `GenerateBalanceLinkageProof()`.
-  - Proof verification: `VerifyConvertProof()`, `VerifyConvertBackProof()`, `VerifySendProof()`, `VerifyClawbackProof()`, `VerifyRevealedAmount()`, `VerifyAmountLinkage()`, `VerifyBalanceLinkage()`, `VerifyEqualityProof()`, `VerifySendRangeProof()`.
-  - Utilities: `GetSendProofSize()`, `ComputeConvertBackRemainder()`.
-  - New types: `Participant`, `PedersenProofParams`.
-- Added `confidential/commitment` package providing a hex-string API for Pedersen commitment creation (`Create()`), wrapping `mptcrypto.PedersenCommitment()`.
-- Added `confidential/proof` package providing a hex-string API for ZK proof generation and verification with classic XRPL address support:
-  - Context hashes: `ConvertContextHash()`, `ConvertBackContextHash()`, `SendContextHash()`, `ClawbackContextHash()` (accept classic addresses).
-  - Proof generation/verification: `GenerateConvertProof()`/`VerifyConvertProof()`, `GenerateConvertBackProof()`/`VerifyConvertBackProof()`, `GenerateSendProof()`/`VerifySendProof()`, `GenerateClawbackProof()`/`VerifyClawbackProof()`.
-  - Component verifiers: `VerifyRevealedAmount()`, `VerifyAmountLinkage()`, `VerifyBalanceLinkage()`, `VerifyEqualityProof()`, `VerifySendRangeProof()`.
-
-#### pkg/hexutil
-
-- Added `DecodeFixedHex()` to decode a hex string and validate it decodes to exactly N bytes.
-
 #### binary-codec
 
 - Added protocol definitions and canonical wire encoding for all five XLS-96 confidential MPT transaction types and their ledger fields.
