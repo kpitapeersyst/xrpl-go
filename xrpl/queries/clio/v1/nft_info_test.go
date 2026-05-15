@@ -5,6 +5,9 @@ import (
 
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/Peersyst/xrpl-go/xrpl/transaction"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNFTInfoRequest(t *testing.T) {
@@ -47,5 +50,51 @@ func TestNFTInfoResponse(t *testing.T) {
 }`
 	if err := testutil.SerializeAndDeserialize(t, s, j); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestNFTInfoRequest_Validate(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  NFTInfoRequest
+		expected error
+	}{
+		{
+			name: "pass - valid NFTokenID",
+			request: NFTInfoRequest{
+				NFTokenID: "00080000B4F4AFC5FBCBD76873F18006173D2193467D3EE70000099B00000000",
+			},
+			expected: nil,
+		},
+		{
+			name:     "fail - missing NFTokenID",
+			request:  NFTInfoRequest{},
+			expected: transaction.ErrInvalidNFTokenID,
+		},
+		{
+			name: "fail - short NFTokenID",
+			request: NFTInfoRequest{
+				NFTokenID: "ABC123",
+			},
+			expected: transaction.ErrInvalidNFTokenID,
+		},
+		{
+			name: "fail - non-hex NFTokenID",
+			request: NFTInfoRequest{
+				NFTokenID: "ZZZ80000B4F4AFC5FBCBD76873F18006173D2193467D3EE70000099B00000000",
+			},
+			expected: transaction.ErrInvalidNFTokenID,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.request.Validate()
+			if tt.expected == nil {
+				require.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, tt.expected)
+			}
+		})
 	}
 }

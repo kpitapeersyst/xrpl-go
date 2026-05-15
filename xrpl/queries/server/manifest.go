@@ -1,6 +1,7 @@
 package server
 
 import (
+	addresscodec "github.com/Peersyst/xrpl-go/address-codec"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
 )
@@ -36,8 +37,15 @@ func (*ManifestRequest) APIVersion() int {
 }
 
 // Validate verifies the ManifestRequest parameters.
-// TODO: implement V2.
-func (*ManifestRequest) Validate() error {
+func (r *ManifestRequest) Validate() error {
+	if r.PublicKey == "" {
+		return ErrNoPublicKey
+	}
+
+	if _, err := addresscodec.DecodeNodePublicKey(r.PublicKey); err != nil {
+		return ErrInvalidPublicKey
+	}
+
 	return nil
 }
 

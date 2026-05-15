@@ -2,6 +2,7 @@ package v1
 
 import (
 	"github.com/Peersyst/xrpl-go/xrpl/ledger-entry-types"
+	accounttypes "github.com/Peersyst/xrpl-go/xrpl/queries/account/types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
@@ -58,8 +59,11 @@ func (*ObjectsRequest) APIVersion() int {
 }
 
 // Validate checks the ObjectsRequest parameters for validity.
-// TODO implement v2
-func (*ObjectsRequest) Validate() error {
+func (r *ObjectsRequest) Validate() error {
+	if r.Account == "" {
+		return accounttypes.ErrNoAccountID
+	}
+
 	return nil
 }
 

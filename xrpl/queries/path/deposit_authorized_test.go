@@ -5,6 +5,7 @@ import (
 
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDepositAuthorizedRequest(t *testing.T) {
@@ -22,6 +23,47 @@ func TestDepositAuthorizedRequest(t *testing.T) {
 
 	if err := testutil.Serialize(t, s, j); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestDepositAuthorizedRequestValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  DepositAuthorizedRequest
+		expected error
+	}{
+		{
+			name: "pass - minimal request",
+			request: DepositAuthorizedRequest{
+				SourceAccount:      "rEhxGqkqPPSxQ3P25J66ft5TwpzV14k2de",
+				DestinationAccount: "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+			},
+		},
+		{
+			name: "fail - missing source_account",
+			request: DepositAuthorizedRequest{
+				DestinationAccount: "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+			},
+			expected: ErrMissingSourceAccount,
+		},
+		{
+			name: "fail - missing destination_account",
+			request: DepositAuthorizedRequest{
+				SourceAccount: "rEhxGqkqPPSxQ3P25J66ft5TwpzV14k2de",
+			},
+			expected: ErrMissingDestinationAccount,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.request.Validate()
+			if tt.expected == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.expected)
+			}
+		})
 	}
 }
 

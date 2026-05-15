@@ -3,6 +3,7 @@ package v1
 import (
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
+	"github.com/Peersyst/xrpl-go/xrpl/transaction"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
 )
 
@@ -29,8 +30,11 @@ func (*NFTInfoRequest) APIVersion() int {
 }
 
 // Validate checks the NFTInfoRequest for correctness.
-// TODO: Implement V2
-func (*NFTInfoRequest) Validate() error {
+func (r *NFTInfoRequest) Validate() error {
+	if !transaction.IsHex256(r.NFTokenID.String()) {
+		return transaction.ErrInvalidNFTokenID
+	}
+
 	return nil
 }
 

@@ -4,6 +4,7 @@ package v1
 import (
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
+	"github.com/Peersyst/xrpl-go/xrpl/transaction"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
 
 	nfttypes "github.com/Peersyst/xrpl-go/xrpl/queries/nft/types"
@@ -32,8 +33,11 @@ func (*NFTokenBuyOffersRequest) APIVersion() int {
 }
 
 // Validate checks that the NFTokenBuyOffersRequest is correctly formed.
-// TODO implement V2
-func (*NFTokenBuyOffersRequest) Validate() error {
+func (r *NFTokenBuyOffersRequest) Validate() error {
+	if !transaction.IsHex256(r.NFTokenID.String()) {
+		return transaction.ErrInvalidNFTokenID
+	}
+
 	return nil
 }
 

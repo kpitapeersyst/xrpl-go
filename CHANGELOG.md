@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+#### xrpl/queries
+
+- Query request validators now reject missing required fields for account, Clio NFT, NFT offer, book offer, deposit authorization, feature, manifest, and multisigned submission requests before submission.
+- `tx` requests now support `ctid` lookups and reject missing or conflicting transaction lookup selectors.
+
 ## [v0.2.0-rc1]
 
 ### BREAKING CHANGES

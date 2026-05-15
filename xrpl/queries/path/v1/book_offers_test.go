@@ -7,6 +7,7 @@ import (
 	pathtypes "github.com/Peersyst/xrpl-go/xrpl/queries/path/types"
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBookOffersRequest(t *testing.T) {
@@ -35,6 +36,55 @@ func TestBookOffersRequest(t *testing.T) {
 
 	if err := testutil.Serialize(t, s, j); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestBookOffersRequestValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  BookOffersRequest
+		expected error
+	}{
+		{
+			name: "pass - minimal request",
+			request: BookOffersRequest{
+				TakerGets: pathtypes.BookOfferCurrency{
+					Currency: "XRP",
+				},
+				TakerPays: pathtypes.BookOfferCurrency{
+					Currency: "USD",
+				},
+			},
+		},
+		{
+			name: "fail - missing taker_gets currency",
+			request: BookOffersRequest{
+				TakerPays: pathtypes.BookOfferCurrency{
+					Currency: "USD",
+				},
+			},
+			expected: ErrMissingTakerGetsCurrency,
+		},
+		{
+			name: "fail - missing taker_pays currency",
+			request: BookOffersRequest{
+				TakerGets: pathtypes.BookOfferCurrency{
+					Currency: "XRP",
+				},
+			},
+			expected: ErrMissingTakerPaysCurrency,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.request.Validate()
+			if tt.expected == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.expected)
+			}
+		})
 	}
 }
 

@@ -15,7 +15,8 @@ import (
 // It retrieves information on a single transaction by its identifying hash.
 type TxRequest struct {
 	common.BaseRequest
-	Transaction string             `json:"transaction"`
+	Transaction string             `json:"transaction,omitempty"`
+	Ctid        string             `json:"ctid,omitempty"`
 	Binary      bool               `json:"binary,omitempty"`
 	MinLedger   common.LedgerIndex `json:"min_ledger,omitempty"`
 	MaxLedger   common.LedgerIndex `json:"max_ledger,omitempty"`
@@ -32,8 +33,18 @@ func (*TxRequest) APIVersion() int {
 }
 
 // Validate verifies the TxRequest parameters.
-// TODO: implement V2 validation logic.
-func (*TxRequest) Validate() error {
+func (r *TxRequest) Validate() error {
+	hasTransaction := r.Transaction != ""
+	hasCtid := r.Ctid != ""
+
+	if !hasTransaction && !hasCtid {
+		return ErrMissingTxLookupParam
+	}
+
+	if hasTransaction && hasCtid {
+		return ErrConflictingTxLookupParams
+	}
+
 	return nil
 }
 

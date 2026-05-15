@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSubmitRequest(t *testing.T) {
@@ -17,4 +18,8 @@ func TestSubmitRequest(t *testing.T) {
 	if err := testutil.SerializeAndDeserialize(t, s, j); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestSubmitMultisignedRequestValidateMissingTxJSON(t *testing.T) {
+	require.ErrorIs(t, (&SubmitMultisignedRequest{}).Validate(), ErrNoTxJSON)
 }

@@ -32,8 +32,11 @@ func (*NFTsRequest) APIVersion() int {
 }
 
 // Validate checks the NFTsRequest parameters for validity.
-// TODO implement v2
-func (*NFTsRequest) Validate() error {
+func (r *NFTsRequest) Validate() error {
+	if r.Account == "" {
+		return accounttypes.ErrNoAccountID
+	}
+
 	return nil
 }
 

@@ -1549,7 +1549,9 @@ func TestClient_GetNFTBuyOffers(t *testing.T) {
 			cl, cleanup := setupTestClient(t, tt.serverMessages)
 			defer cleanup()
 
-			result, err := cl.GetNFTBuyOffers(&nft.NFTokenBuyOffersRequest{})
+			result, err := cl.GetNFTBuyOffers(&nft.NFTokenBuyOffersRequest{
+				NFTokenID: "00080000B4F4AFC5FBCBD76873F18006173D2193467D3EE70000099B00000000",
+			})
 
 			if tt.expectedErr != nil {
 				if err == nil || err.Error() != tt.expectedErr.Error() {
@@ -1725,7 +1727,14 @@ func TestClient_GetBookOffers(t *testing.T) {
 			cl, cleanup := setupTestClient(t, tt.serverMessages)
 			defer cleanup()
 
-			result, err := cl.GetBookOffers(&path.BookOffersRequest{})
+			result, err := cl.GetBookOffers(&path.BookOffersRequest{
+				TakerGets: pathtypes.BookOfferCurrency{
+					Currency: "XRP",
+				},
+				TakerPays: pathtypes.BookOfferCurrency{
+					Currency: "USD",
+				},
+			})
 
 			if tt.expectedErr != nil {
 				if err == nil || err.Error() != tt.expectedErr.Error() {
@@ -1802,7 +1811,10 @@ func TestClient_GetDepositAuthorized(t *testing.T) {
 			cl, cleanup := setupTestClient(t, tt.serverMessages)
 			defer cleanup()
 
-			result, err := cl.GetDepositAuthorized(&path.DepositAuthorizedRequest{})
+			result, err := cl.GetDepositAuthorized(&path.DepositAuthorizedRequest{
+				SourceAccount:      "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW",
+				DestinationAccount: "rEhxGqkqPPSxQ3P25J66ft5TwpzV14k2de",
+			})
 
 			if tt.expectedErr != nil {
 				if err == nil || err.Error() != tt.expectedErr.Error() {
@@ -2455,7 +2467,9 @@ func TestClient_GetManifest(t *testing.T) {
 			cl, cleanup := setupTestClient(t, tt.serverMessages)
 			defer cleanup()
 
-			result, err := cl.GetManifest(&server.ManifestRequest{})
+			result, err := cl.GetManifest(&server.ManifestRequest{
+				PublicKey: "nHUFE9prPXPrHcG3SkwP1UzAQbSphqyQkQK9ATXLZsfkezhhda3p",
+			})
 
 			if tt.expectedErr != nil {
 				if err == nil || err.Error() != tt.expectedErr.Error() {

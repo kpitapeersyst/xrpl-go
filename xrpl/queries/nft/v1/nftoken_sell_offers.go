@@ -4,6 +4,7 @@ import (
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	nfttypes "github.com/Peersyst/xrpl-go/xrpl/queries/nft/types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
+	"github.com/Peersyst/xrpl-go/xrpl/transaction"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
 )
 
@@ -30,8 +31,11 @@ func (*NFTokenSellOffersRequest) APIVersion() int {
 }
 
 // Validate checks that the NFTokenSellOffersRequest is correctly formed.
-// TODO implement V2
-func (*NFTokenSellOffersRequest) Validate() error {
+func (r *NFTokenSellOffersRequest) Validate() error {
+	if !transaction.IsHex256(r.NFTokenID.String()) {
+		return transaction.ErrInvalidNFTokenID
+	}
+
 	return nil
 }
 

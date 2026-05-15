@@ -1,6 +1,7 @@
 package v1
 
 import (
+	accounttypes "github.com/Peersyst/xrpl-go/xrpl/queries/account/types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
@@ -32,8 +33,11 @@ func (*CurrenciesRequest) APIVersion() int {
 }
 
 // Validate checks that the CurrenciesRequest parameters are valid.
-// TODO: implement V2.
-func (*CurrenciesRequest) Validate() error {
+func (r *CurrenciesRequest) Validate() error {
+	if r.Account == "" {
+		return accounttypes.ErrNoAccountID
+	}
+
 	return nil
 }
 

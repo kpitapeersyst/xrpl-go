@@ -5,6 +5,7 @@ import (
 
 	"github.com/Peersyst/xrpl-go/xrpl/queries/server/types"
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFeatureAllResponse(t *testing.T) {
@@ -47,6 +48,22 @@ func TestFeatureOneRequest(t *testing.T) {
 	if err := testutil.Serialize(t, r, s); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestFeatureOneRequest_Validate(t *testing.T) {
+	t.Run("valid minimal request", func(t *testing.T) {
+		req := FeatureOneRequest{
+			Feature: "feature1",
+		}
+
+		require.NoError(t, req.Validate())
+	})
+
+	t.Run("missing feature", func(t *testing.T) {
+		req := FeatureOneRequest{}
+
+		require.ErrorIs(t, req.Validate(), ErrNoFeature)
+	})
 }
 
 func TestFeatureOneResponse(t *testing.T) {

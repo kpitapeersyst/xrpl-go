@@ -34,8 +34,11 @@ func (*NFTHistoryRequest) APIVersion() int {
 }
 
 // Validate checks the NFTHistoryRequest for correctness.
-// TODO: Implement V2
-func (*NFTHistoryRequest) Validate() error {
+func (r *NFTHistoryRequest) Validate() error {
+	if !transaction.IsHex256(r.NFTokenID) {
+		return transaction.ErrInvalidNFTokenID
+	}
+
 	return nil
 }
 

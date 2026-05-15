@@ -1,6 +1,7 @@
 package clio
 
 import (
+	accounttypes "github.com/Peersyst/xrpl-go/xrpl/queries/account/types"
 	cliotypes "github.com/Peersyst/xrpl-go/xrpl/queries/clio/types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/version"
@@ -32,8 +33,11 @@ func (*NFTsByIssuerRequest) APIVersion() int {
 }
 
 // Validate checks the NFTsByIssuerRequest for valid parameters.
-// TODO implement V2
-func (*NFTsByIssuerRequest) Validate() error {
+func (r *NFTsByIssuerRequest) Validate() error {
+	if r.Issuer == "" {
+		return accounttypes.ErrNoAccountID
+	}
+
 	return nil
 }
 

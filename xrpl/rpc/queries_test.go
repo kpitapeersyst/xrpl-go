@@ -1467,7 +1467,7 @@ func TestClient_GetNFTBuyOffers(t *testing.T) {
 			}`,
 			mockStatus: 200,
 			request: &nft.NFTokenBuyOffersRequest{
-				NFTokenID: "invalidNFTID",
+				NFTokenID: "00080000B4F4AFC5FBCBD76873F18006173D2193467D3EE70000099B00000000",
 			},
 			expectedError: "nftNotFound",
 		},
@@ -1656,8 +1656,15 @@ func TestClient_GetBookOffers(t *testing.T) {
 					"status": "error"
 				}
 			}`,
-			mockStatus:    200,
-			request:       &path.BookOffersRequest{},
+			mockStatus: 200,
+			request: &path.BookOffersRequest{
+				TakerGets: pathtypes.BookOfferCurrency{
+					Currency: "XRP",
+				},
+				TakerPays: pathtypes.BookOfferCurrency{
+					Currency: "USD",
+				},
+			},
 			expectedError: "invalidParams",
 		},
 	}
@@ -1733,8 +1740,11 @@ func TestClient_GetDepositAuthorized(t *testing.T) {
 					"status": "error"
 				}
 			}`,
-			mockStatus:    200,
-			request:       &path.DepositAuthorizedRequest{},
+			mockStatus: 200,
+			request: &path.DepositAuthorizedRequest{
+				SourceAccount:      "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+				DestinationAccount: "rEhxGqkqPPSxQ3P25J66ft5TwpzV14k2de",
+			},
 			expectedError: "invalidParams",
 		},
 	}
@@ -2610,7 +2620,7 @@ func TestClient_GetManifest(t *testing.T) {
 			}`,
 			mockStatus: 200,
 			request: &server.ManifestRequest{
-				PublicKey: "nHUon2tpyJEHHYGmxqeGu37cvPYHzrMtUNQyNinmg4rMdN5q58Bt",
+				PublicKey: "nHUFE9prPXPrHcG3SkwP1UzAQbSphqyQkQK9ATXLZsfkezhhda3p",
 			},
 			expected: server.ManifestResponse{
 				Details: server.ManifestDetails{
@@ -2629,8 +2639,10 @@ func TestClient_GetManifest(t *testing.T) {
 					"status": "error"
 				}
 			}`,
-			mockStatus:    200,
-			request:       &server.ManifestRequest{},
+			mockStatus: 200,
+			request: &server.ManifestRequest{
+				PublicKey: "nHUFE9prPXPrHcG3SkwP1UzAQbSphqyQkQK9ATXLZsfkezhhda3p",
+			},
 			expectedError: "invalidParams",
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManifestRequest(t *testing.T) {
@@ -18,6 +19,30 @@ func TestManifestRequest(t *testing.T) {
 	if err := testutil.SerializeAndDeserialize(t, s, j); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestManifestRequest_Validate(t *testing.T) {
+	t.Run("valid minimal request", func(t *testing.T) {
+		req := ManifestRequest{
+			PublicKey: "nHUFE9prPXPrHcG3SkwP1UzAQbSphqyQkQK9ATXLZsfkezhhda3p",
+		}
+
+		require.NoError(t, req.Validate())
+	})
+
+	t.Run("missing public key", func(t *testing.T) {
+		req := ManifestRequest{}
+
+		require.ErrorIs(t, req.Validate(), ErrNoPublicKey)
+	})
+
+	t.Run("invalid public key", func(t *testing.T) {
+		req := ManifestRequest{
+			PublicKey: "not-a-validator-public-key",
+		}
+
+		require.ErrorIs(t, req.Validate(), ErrInvalidPublicKey)
+	})
 }
 
 func TestManifestResponse(t *testing.T) {
