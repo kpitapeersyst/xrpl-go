@@ -114,6 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### confidential
 
+- Fixed the `mpt-crypto` build workflow on newer macOS runners by extending
+  Conan's compiler settings with the detected Apple Clang version.
 - Fixed confidential send proof verification to reject any proof whose length differs from the fixed 946-byte compact proof blob before passing it to the C verifier.
 - Fixed `VerifySendRangeProof()` docs and helper naming to match the current `mpt-crypto` contract, which expects the sender's original balance commitment.
 

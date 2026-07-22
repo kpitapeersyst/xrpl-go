@@ -183,8 +183,28 @@ jobs:
 
       - name: Install Conan
         run: |
+          set -euo pipefail
           pip install "conan==2.26.2"
           conan profile detect
+
+          # Hosted runners can ship compilers newer than Conan's bundled
+          # settings.yml. Extend, rather than replace, the supported versions
+          # with the compiler version detected in the ephemeral runner profile.
+          conan_home=$(conan config home)
+          profile="$conan_home/profiles/default"
+          compiler=$(sed -n 's/^compiler=//p' "$profile")
+          compiler_version=$(sed -n 's/^compiler.version=//p' "$profile")
+          if [ -z "$compiler" ] || [ -z "$compiler_version" ]; then
+            echo "::error::Could not read compiler settings from $profile"
+            exit 1
+          fi
+          cat > "$conan_home/settings_user.yml" <<EOF
+          compiler:
+            $compiler:
+              version: ["$compiler_version"]
+          EOF
+          conan profile show -pr:h default >/dev/null
+
           conan remote add --index 0 xrplf https://conan.ripplex.io
 
       - name: Build CGO dependency bundle
