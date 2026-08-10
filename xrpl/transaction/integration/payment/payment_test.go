@@ -1,9 +1,12 @@
 package payment
 
 import (
+	"os"
 	"testing"
 
+	addresscodec "github.com/Peersyst/xrpl-go/address-codec"
 	"github.com/Peersyst/xrpl-go/xrpl/hash"
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 	ledger "github.com/Peersyst/xrpl-go/xrpl/ledger-entry-types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/account"
 	"github.com/Peersyst/xrpl-go/xrpl/rpc"
@@ -32,6 +35,49 @@ func testIntegrationPayment(t *testing.T, client integration.Client) {
 		flatPaymentTx := paymentTx.Flatten()
 		_, err = runner.TestTransaction(&flatPaymentTx, sender, "tesSUCCESS", nil)
 		require.NoError(t, err)
+	})
+
+	t.Run("pass - X-address autofill and network identity", func(t *testing.T) {
+		testnetAddress := os.Getenv(integration.IntegrationEnvVar) != string(integration.LocalnetEnv)
+		sourceXAddress, err := addresscodec.ClassicAddressToXAddress(
+			sender.GetAddress().String(),
+			0,
+			true,
+			testnetAddress,
+		)
+		require.NoError(t, err)
+		destinationXAddress, err := addresscodec.ClassicAddressToXAddress(
+			receiver.GetAddress().String(),
+			14,
+			true,
+			testnetAddress,
+		)
+		require.NoError(t, err)
+
+		paymentTx := &transaction.Payment{
+			BaseTx:      transaction.BaseTx{Account: types.Address(sourceXAddress)},
+			Amount:      types.XRPCurrencyAmount(1000),
+			Destination: types.Address(destinationXAddress),
+		}
+		flatPaymentTx := paymentTx.Flatten()
+		_, err = runner.TestTransaction(&flatPaymentTx, sender, "tesSUCCESS", nil)
+		require.NoError(t, err)
+		networkID, buildVersion := client.NetworkIdentity()
+		networkIDRequired, err := clientinternal.NetworkIDRequired(clientinternal.NetworkIdentity{
+			NetworkID:    networkID,
+			BuildVersion: buildVersion,
+		})
+		require.NoError(t, err)
+		require.Equal(t, sender.GetAddress().String(), flatPaymentTx["Account"])
+		require.Equal(t, uint32(0), flatPaymentTx["SourceTag"])
+		require.Equal(t, receiver.GetAddress().String(), flatPaymentTx["Destination"])
+		require.Equal(t, uint32(14), flatPaymentTx["DestinationTag"])
+		if networkIDRequired {
+			require.NotNil(t, networkID)
+			require.Equal(t, *networkID, flatPaymentTx["NetworkID"])
+		} else {
+			require.NotContains(t, flatPaymentTx, "NetworkID")
+		}
 	})
 
 	t.Run("pass - payment specifying amount field", func(t *testing.T) {

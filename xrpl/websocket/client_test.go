@@ -10,6 +10,7 @@ import (
 	"time"
 
 	commonconstants "github.com/Peersyst/xrpl-go/xrpl/common"
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 	clientconfigtestutil "github.com/Peersyst/xrpl-go/xrpl/internal/clientconfig/testutil"
 	ledgerentry "github.com/Peersyst/xrpl-go/xrpl/ledger-entry-types"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/account"
@@ -457,104 +458,15 @@ func TestClient_formatRequest(t *testing.T) {
 	}
 }
 
-func TestClient_convertTransactionAddressToClassicAddress(t *testing.T) {
-	ws := &Client{}
-	tests := []struct {
-		name      string
-		tx        transaction.FlatTransaction
-		fieldName string
-		expected  transaction.FlatTransaction
-	}{
-		{
-			name: "No conversion for classic address",
-			tx: transaction.FlatTransaction{
-				"Destination": "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-			},
-			fieldName: "Destination",
-			expected: transaction.FlatTransaction{
-				"Destination": "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-			},
-		},
-		{
-			name: "Field not present in transaction",
-			tx: transaction.FlatTransaction{
-				"Amount": "1000000",
-			},
-			fieldName: "Destination",
-			expected: transaction.FlatTransaction{
-				"Amount": "1000000",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ws.convertTransactionAddressToClassicAddress(&tt.tx, tt.fieldName)
-			if reflect.DeepEqual(tt.expected, &tt.tx) {
-				t.Errorf("expected %+v, result %+v", tt.expected, &tt.tx)
-			}
-		})
-	}
-}
-
-func TestClient_validateTransactionAddress(t *testing.T) {
-	ws := &Client{}
-	tests := []struct {
-		name         string
-		tx           transaction.FlatTransaction
-		addressField string
-		tagField     string
-		expected     transaction.FlatTransaction
-		expectedErr  error
-	}{
-		{
-			name: "Valid classic address without tag",
-			tx: transaction.FlatTransaction{
-				"Account": "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-			},
-			addressField: "Account",
-			tagField:     "SourceTag",
-			expected: transaction.FlatTransaction{
-				"Account": "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-			},
-			expectedErr: nil,
-		},
-		{
-			name: "Valid classic address with tag",
-			tx: transaction.FlatTransaction{
-				"Destination":    "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"DestinationTag": uint32(12345),
-			},
-			addressField: "Destination",
-			tagField:     "DestinationTag",
-			expected: transaction.FlatTransaction{
-				"Destination":    "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"DestinationTag": uint32(12345),
-			},
-			expectedErr: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ws.validateTransactionAddress(&tt.tx, tt.addressField, tt.tagField)
-
-			if tt.expectedErr != nil {
-				if !errors.Is(err, tt.expectedErr) {
-					t.Errorf("Expected error %v, but got %v", tt.expectedErr, err)
-				}
-			} else if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-
-			if !reflect.DeepEqual(tt.expected, tt.tx) {
-				t.Errorf("Expected %v, but got %v", tt.expected, tt.tx)
-			}
-		})
-	}
-}
-
+// Exhaustive X-address and tag policy cases live in xrpl/internal/client.
+// These cases only verify the client wiring: delegation through
+// FlatTransaction and the re-exported error identities.
 func TestClient_setValidTransactionAddresses(t *testing.T) {
+	const (
+		classic         = "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59"
+		testnetTag14    = "T719a5UwUCnEs54UsxG9CJYYDhwmFCvqXVCALUGJGSbNV3x"
+		invalidXAddress = "XVLhHMPHU98es4dbozjVtdWzVrDjtV5fdx1mHp98tDMoQXa"
+	)
 	tests := []struct {
 		name        string
 		tx          transaction.FlatTransaction
@@ -562,52 +474,54 @@ func TestClient_setValidTransactionAddresses(t *testing.T) {
 		expectedErr error
 	}{
 		{
-			name: "Valid transaction with classic addresses",
+			name: "classic addresses are unchanged",
 			tx: transaction.FlatTransaction{
-				"Account":     "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
+				"Account":     classic,
 				"Destination": "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe",
 			},
 			expected: transaction.FlatTransaction{
-				"Account":     "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
+				"Account":     classic,
 				"Destination": "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe",
 			},
-			expectedErr: nil,
 		},
 		{
-			name: "Transaction with additional address fields",
+			name: "converts X-address and applies embedded tag",
+			tx:   transaction.FlatTransaction{"Destination": testnetTag14},
+			expected: transaction.FlatTransaction{
+				"Destination":    classic,
+				"DestinationTag": uint32(14),
+			},
+		},
+		{
+			name: "explicit tag conflict",
 			tx: transaction.FlatTransaction{
-				"Account":     "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"Destination": "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe",
-				"Owner":       "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"RegularKey":  "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
+				"Destination":    testnetTag14,
+				"DestinationTag": uint32(13),
 			},
 			expected: transaction.FlatTransaction{
-				"Account":     "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"Destination": "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe",
-				"Owner":       "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
-				"RegularKey":  "rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf",
+				"Destination":    testnetTag14,
+				"DestinationTag": uint32(13),
 			},
-			expectedErr: nil,
+			expectedErr: ErrMismatchedTag,
+		},
+		{
+			name:        "invalid X-address",
+			tx:          transaction.FlatTransaction{"Account": invalidXAddress},
+			expected:    transaction.FlatTransaction{"Account": invalidXAddress},
+			expectedErr: ErrInvalidAddress,
 		},
 	}
 
 	ws := &Client{}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ws.setValidTransactionAddresses(&tt.tx)
-
 			if tt.expectedErr != nil {
-				if !errors.Is(err, tt.expectedErr) {
-					t.Errorf("Expected error %v, but got %v", tt.expectedErr, err)
-				}
-			} else if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				require.ErrorIs(t, err, tt.expectedErr)
+			} else {
+				require.NoError(t, err)
 			}
-
-			if !reflect.DeepEqual(tt.expected, tt.tx) {
-				t.Errorf("Expected %v, but got %v", tt.expected, tt.tx)
-			}
+			require.Equal(t, tt.expected, tt.tx)
 		})
 	}
 }
@@ -1153,6 +1067,7 @@ func TestClient_checkAccountDeleteBlockers(t *testing.T) {
 
 			url, _ := testutil.ConvertHTTPToWS(s.URL)
 			cl := NewClient(NewClientConfig().WithHost(url))
+			setTrustedTestNetworkIdentity(cl, 0)
 
 			if err := cl.Connect(); err != nil {
 				t.Errorf("Error connecting to server: %v", err)
@@ -1229,6 +1144,44 @@ func TestClient_Autofill(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedTx, tt.tx)
+		})
+	}
+}
+
+func TestClient_AutofillChecksAccountDeleteBlockersForStringAddress(t *testing.T) {
+	const (
+		classicAddress = "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59"
+		xAddress       = "X7AcgcsBL6XDcUb289X4mJ8djcdyKaB5hJDWMArnXr61cqZ"
+	)
+	blockerResponse := map[string]any{
+		"id":     1,
+		"result": map[string]any{"account_objects": []any{map[string]any{}}},
+	}
+
+	tests := []struct {
+		name    string
+		account any
+	}{
+		{name: "plain string", account: classicAddress},
+		{name: "named X-address", account: types.Address(xAddress)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := transaction.FlatTransaction{
+				"Account":            tt.account,
+				"TransactionType":    transaction.AccountDeleteTx.String(),
+				"Sequence":           uint32(1),
+				"Fee":                "10",
+				"LastLedgerSequence": uint32(100),
+			}
+			cl, cleanup := setupTestClientForAutofill(t, []map[string]any{blockerResponse})
+			defer cleanup()
+
+			err := cl.Autofill(&tx)
+
+			require.ErrorIs(t, err, ErrAccountCannotBeDeleted)
+			require.Equal(t, classicAddress, tx["Account"])
 		})
 	}
 }
@@ -1446,14 +1399,6 @@ func TestClient_autofillRawTransactions(t *testing.T) {
 				{
 					"id": 1,
 					"result": map[string]any{
-						"info": map[string]any{
-							"build_version": "1.12.0",
-						},
-					},
-				},
-				{
-					"id": 2,
-					"result": map[string]any{
 						"account_data": map[string]any{
 							"Sequence": uint32(42),
 						},
@@ -1464,6 +1409,7 @@ func TestClient_autofillRawTransactions(t *testing.T) {
 			expectedTx: transaction.FlatTransaction{
 				"Account":         "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
 				"TransactionType": "Batch",
+				"NetworkID":       uint32(2000),
 				"RawTransactions": []map[string]any{
 					{
 						"RawTransaction": map[string]any{
@@ -1633,19 +1579,8 @@ func TestClient_autofillRawTransactions(t *testing.T) {
 					},
 				},
 			},
-			serverMessages: []map[string]any{
-				{
-					"id":     1,
-					"status": "success",
-					"type":   "response",
-					"result": map[string]any{
-						"info": map[string]any{
-							"build_version": "1.12.0",
-						},
-					},
-				},
-			},
-			networkID: uint32(2000),
+			serverMessages: []map[string]any{},
+			networkID:      uint32(2000),
 			expectedTx: transaction.FlatTransaction{
 				"Account":         "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
 				"TransactionType": "Batch",
@@ -2044,10 +1979,15 @@ func TestClient_autofillRawTransactions(t *testing.T) {
 			cl, cleanup := setupTestClientForAutofill(t, tt.serverMessages)
 			defer cleanup()
 
-			// Set NetworkID for test
-			cl.NetworkID = tt.networkID
-
-			err := cl.autofillRawTransactions(&tt.tx)
+			// Apply the policy once before this direct raw-transaction helper test.
+			setTrustedTestNetworkIdentity(cl, tt.networkID)
+			identity, err := cl.networkIdentity()
+			if err == nil {
+				err = clientinternal.ApplyNetworkIDPolicy(tt.tx, identity)
+			}
+			if err == nil {
+				err = cl.autofillRawTransactions(&tt.tx)
+			}
 
 			if tt.expectedErr != nil {
 				if err == nil {
@@ -2107,6 +2047,7 @@ func setupTestClientForAutofill(t *testing.T, serverMessages []map[string]any) (
 
 	url, _ := testutil.ConvertHTTPToWS(s.URL)
 	cl := NewClient(NewClientConfig().WithHost(url))
+	setTrustedTestNetworkIdentity(cl, 0)
 
 	if err := cl.Connect(); err != nil {
 		t.Fatalf("Error connecting to server: %v", err)
@@ -2143,6 +2084,7 @@ func setupRequestDispatchTestClient(t *testing.T, handler func(*websocket.Conn))
 	cl := NewClient(NewClientConfig().
 		WithHost(url).
 		WithTimeout(100 * time.Millisecond))
+	setTrustedTestNetworkIdentity(cl, 0)
 
 	require.NoError(t, cl.Connect())
 
@@ -2322,6 +2264,7 @@ func TestClient_FundWallet(t *testing.T) {
 					WithTimeout(1 * time.Second).
 					WithFaucetProvider(&mockFaucetProvider{err: tt.faucetErr}),
 			)
+			setTrustedTestNetworkIdentity(cl, 0)
 
 			require.NoError(t, cl.Connect())
 			defer cl.Disconnect()
@@ -2382,6 +2325,7 @@ func TestClient_ReconnectConsumesBudgetOnConnectFailures(t *testing.T) {
 		WithMaxReconnects(budget)
 
 	cl := NewClient(cfg)
+	setTrustedTestNetworkIdentity(cl, 0)
 
 	errCh := make(chan error, 1)
 	cl.OnError(func(err error) {
@@ -2437,6 +2381,7 @@ func TestClient_ReconnectConsumesBudgetWhenReconnectClosesBeforeMessage(t *testi
 		WithMaxReconnects(budget)
 
 	cl := NewClient(cfg)
+	setTrustedTestNetworkIdentity(cl, 0)
 
 	errCh := make(chan error, 1)
 	cl.OnError(func(err error) {

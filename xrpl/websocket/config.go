@@ -35,6 +35,10 @@ type ClientConfig struct {
 
 	// Faucet config
 	faucetProvider common.FaucetProvider
+
+	// Trusted network identity override.
+	networkID    *uint32
+	buildVersion string
 }
 
 // NewClientConfig returns a ClientConfig initialized with default settings.
@@ -97,6 +101,15 @@ func (wc ClientConfig) WithMaxReconnects(maxReconnects int) ClientConfig {
 // Default: 1 second
 func (wc ClientConfig) WithRetryDelay(retryDelay time.Duration) ClientConfig {
 	wc.retryDelay = retryDelay
+	return wc
+}
+
+// WithNetworkIdentity configures a network identity from a trusted deployment.
+// A nonempty buildVersion is required to bypass server_info discovery. An empty
+// buildVersion leaves the identity incomplete, so the client performs discovery.
+func (wc ClientConfig) WithNetworkIdentity(networkID uint32, buildVersion string) ClientConfig {
+	wc.networkID = &networkID
+	wc.buildVersion = buildVersion
 	return wc
 }
 

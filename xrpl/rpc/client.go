@@ -1,4 +1,9 @@
 // Package rpc provides RPC client functionality for interacting with XRPL servers.
+//
+// A Client discovers network identity before its first identity-dependent
+// operation and caches the first successful discovery for the client lifetime.
+// A failed discovery is returned and a later operation retries it. A trusted
+// identity configured with WithNetworkIdentity bypasses discovery.
 package rpc
 
 import (
@@ -12,6 +17,7 @@ import (
 	binarycodec "github.com/Peersyst/xrpl-go/binary-codec"
 	commonconstants "github.com/Peersyst/xrpl-go/xrpl/common"
 	"github.com/Peersyst/xrpl-go/xrpl/hash"
+	clientinternal "github.com/Peersyst/xrpl-go/xrpl/internal/client"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/account"
 	"github.com/Peersyst/xrpl-go/xrpl/queries/common"
 	requests "github.com/Peersyst/xrpl-go/xrpl/queries/transactions"
@@ -37,13 +43,22 @@ const maxDrainBytes = 4 << 10 // 4 KiB
 type Client struct {
 	cfg *Config
 
-	NetworkID uint32
+	networkID    *uint32
+	buildVersion string
+
+	identity networkIdentityState
 }
 
 // NewClient creates a new RPC Client with the given configuration.
 func NewClient(cfg *Config) *Client {
+	networkID := clientinternal.CloneNetworkID(cfg.networkID)
 	return &Client{
-		cfg: cfg,
+		cfg:          cfg,
+		networkID:    networkID,
+		buildVersion: cfg.buildVersion,
+		identity: networkIdentityState{
+			ready: networkID != nil && cfg.buildVersion != "",
+		},
 	}
 }
 
@@ -254,6 +269,11 @@ func (c *Client) SubmitMultisigned(txBlob string, failHard bool) (*requests.Subm
 
 // Autofill fills in the missing fields in a transaction.
 func (c *Client) Autofill(tx *transaction.FlatTransaction) error {
+	identity, err := c.ensureNetworkIdentity()
+	if err != nil {
+		return err
+	}
+
 	if err := c.setValidTransactionAddresses(tx); err != nil {
 		return err
 	}
@@ -266,10 +286,8 @@ func (c *Client) Autofill(tx *transaction.FlatTransaction) error {
 		return err
 	}
 
-	if _, ok := (*tx)["NetworkID"]; !ok {
-		if c.NetworkID != 0 {
-			(*tx)["NetworkID"] = c.NetworkID
-		}
+	if err := clientinternal.ApplyNetworkIDPolicy(*tx, identity); err != nil {
+		return err
 	}
 	if _, ok := (*tx)["Sequence"]; !ok {
 		err := c.setTransactionNextValidSequenceNumber(tx)
@@ -290,8 +308,8 @@ func (c *Client) Autofill(tx *transaction.FlatTransaction) error {
 		}
 	}
 	if txType, ok := (*tx)["TransactionType"].(string); ok {
-		if acc, ok := (*tx)["Account"].(types.Address); txType == transaction.AccountDeleteTx.String() && ok {
-			err := c.checkAccountDeleteBlockers(acc)
+		if acc, ok := clientinternal.TransactionString((*tx)["Account"]); txType == transaction.AccountDeleteTx.String() && ok {
+			err := c.checkAccountDeleteBlockers(types.Address(acc))
 			if err != nil {
 				return err
 			}
@@ -388,18 +406,6 @@ func (c *Client) autofillRawTransactions(tx *transaction.FlatTransaction) error 
 		return ErrRawTransactionsFieldIsNotAnArray
 	}
 
-	var outerNetworkID *uint32
-	if outer := (*tx)["NetworkID"]; outer != nil {
-		outerNetworkIDUint, ok := outer.(uint32)
-		if !ok {
-			return ErrNetworkIDFieldIsNotAUint32
-		}
-		if outerNetworkIDUint != c.NetworkID {
-			return ErrNetworkIDFieldMismatch
-		}
-		outerNetworkID = &outerNetworkIDUint
-	}
-
 	inners := make([]validatedInnerTx, 0, len(rawTxs))
 	for _, rawTx := range rawTxs {
 		innerRawTx, ok := rawTx["RawTransaction"].(map[string]any)
@@ -427,25 +433,7 @@ func (c *Client) autofillRawTransactions(tx *transaction.FlatTransaction) error 
 			return ErrSignersFieldMustBeEmpty
 		}
 
-		if networkID := innerRawTx["NetworkID"]; networkID != nil {
-			innerNetworkID, ok := networkID.(uint32)
-			if !ok {
-				return ErrNetworkIDFieldIsNotAUint32
-			}
-			if innerNetworkID != c.NetworkID {
-				return ErrNetworkIDFieldMismatch
-			}
-			if outerNetworkID != nil && innerNetworkID != *outerNetworkID {
-				return ErrNetworkIDFieldMismatch
-			}
-		}
-
 		inners = append(inners, validatedInnerTx{rawTx: innerRawTx, account: acc})
-	}
-
-	needsNetworkID, err := c.txNeedsNetworkID()
-	if err != nil {
-		return err
 	}
 
 	accountSeq := make(map[string]uint32, len(inners))
@@ -458,10 +446,6 @@ func (c *Client) autofillRawTransactions(tx *transaction.FlatTransaction) error 
 
 		if innerRawTx["SigningPubKey"] == nil {
 			innerRawTx["SigningPubKey"] = ""
-		}
-
-		if innerRawTx["NetworkID"] == nil && needsNetworkID {
-			innerRawTx["NetworkID"] = c.NetworkID
 		}
 
 		if innerRawTx["Sequence"] == nil && innerRawTx["TicketSequence"] == nil {
