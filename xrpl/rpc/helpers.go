@@ -213,19 +213,15 @@ func (c *Client) calculateFeePerTransactionType(tx *transaction.FlatTransaction,
 
 	baseFee := baseFeeUint
 
-	// Get transaction type
-	transactionType := ""
-	if txType, ok := (*tx)["TransactionType"]; ok {
-		if str, ok := txType.(string); ok {
-			transactionType = str
-		}
-	}
+	transactionType := tx.TxType()
 
-	// Check if this is a special transaction cost type
-	isSpecialTxCost := transactionType == "AccountDelete" || transactionType == "AMMCreate"
+	// The fee for these transaction types includes one incremental owner reserve.
+	isSpecialTxCost := transactionType == transaction.AccountDeleteTx ||
+		transactionType == transaction.AMMCreateTx ||
+		transactionType == transaction.VaultCreateTx
 
-	switch transactionType {
-	case "EscrowFinish":
+	switch transactionType { //nolint:exhaustive // Only transaction types with nonstandard fees need cases.
+	case transaction.EscrowFinishTx:
 		if fulfillment, ok := (*tx)["Fulfillment"]; ok && fulfillment != nil {
 			if fulfillmentStr, ok := fulfillment.(string); ok && fulfillmentStr != "" {
 				fulfillmentBytesSize := (len(fulfillmentStr) + 1) / 2 // Math.ceil(length / 2)
@@ -237,25 +233,27 @@ func (c *Client) calculateFeePerTransactionType(tx *transaction.FlatTransaction,
 				baseFee = baseFeeUint * (33 + chunks)
 			}
 		}
-	case "AccountDelete", "AMMCreate":
+	case transaction.AccountDeleteTx, transaction.AMMCreateTx, transaction.VaultCreateTx:
 		reserveFee, err := c.fetchOwnerReserveFee()
 		if err != nil {
 			return err
 		}
 		baseFee = reserveFee
-	case "Batch":
+	case transaction.BatchTx:
 		rawTxFees, err := c.calculateBatchFees(tx)
 		if err != nil {
 			return err
 		}
 		baseFee = baseFeeUint*2 + rawTxFees
-	case "LoanSet":
+	case transaction.LoanSetTx:
 		// For LoanSet, account for counterparty signers
 		counterPartySignersCount, err := c.fetchCounterPartySignersCount(*tx)
 		if err != nil {
 			return err
 		}
 		baseFee = baseFeeUint + (baseFeeUint * counterPartySignersCount)
+	default:
+		// All other transaction types use the base fee.
 	}
 
 	// Multi-signed Transaction: BaseFee × (1 + Number of Signatures Provided)
@@ -315,14 +313,10 @@ func (c *Client) checkAccountDeleteBlockers(address types.Address) error {
 }
 
 func (c *Client) checkPaymentAmounts(tx *transaction.FlatTransaction) error {
-	if _, ok := (*tx)["DeliverMax"]; ok {
-		if _, ok := (*tx)["Amount"]; !ok {
-			(*tx)["Amount"] = (*tx)["DeliverMax"]
-		} else if (*tx)["Amount"] != (*tx)["DeliverMax"] {
-			return ErrAmountAndDeliverMaxMustBeIdentical
-		}
+	if tx.TxType() != transaction.PaymentTx {
+		return nil
 	}
-	return nil
+	return clientinternal.NormalizeDeliverMax(*tx)
 }
 
 func (c *Client) submitMultisignedRequest(req *requests.SubmitMultisignedRequest) (*requests.SubmitMultisignedResponse, error) {
@@ -403,34 +397,54 @@ func (c *Client) waitForTransaction(txHash string, lastLedgerSequence uint32) (*
 }
 
 // getSignedTx ensures the transaction is fully signed and returns the transaction blob.
-// If the transaction is already signed, it encodes and returns it. Otherwise, it autofills (if enabled)
-// and signs the transaction using the provided wallet.
+// Submission works on a deep copy, so autofill, address conversion, NetworkID policy,
+// and DeliverMax normalization never mutate the caller-owned transaction map.
+//
+// Even when autofill is disabled, this client submission path needs a discovered
+// network identity, or trusted values from WithNetworkIdentity, before it signs.
+// Call wallet.Sign directly when signing must be fully offline.
 func (c *Client) getSignedTx(tx transaction.FlatTransaction, autofill bool, wallet *wallet.Wallet) (string, error) {
-	// Check if the transaction is already signed: both fields must be non-empty.
-	sig, sigOk := tx["TxnSignature"].(string)
-	pubKey, pubKeyOk := tx["SigningPubKey"].(string)
-	if sigOk && sig != "" && pubKeyOk && pubKey != "" {
-		blob, err := binarycodec.Encode(tx)
+	working := transaction.FlatTransaction(clientinternal.CloneTransaction(tx))
+	if working == nil {
+		return "", ErrNilTransaction
+	}
+	if err := c.checkPaymentAmounts(&working); err != nil {
+		return "", err
+	}
+
+	signingType, err := clientinternal.InspectSignedTransaction(working, false)
+	if err != nil {
+		return "", err
+	}
+	if signingType != clientinternal.UnsignedTransaction {
+		blob, err := binarycodec.Encode(working)
 		if err != nil {
 			return "", err
 		}
 		return blob, nil
 	}
 
-	// If not signed, ensure a wallet is provided.
 	if wallet == nil {
 		return "", ErrMissingWallet
 	}
 
-	// Autofill when enabled. Otherwise, sign the caller-supplied transaction unchanged.
 	if autofill {
-		if err := c.Autofill(&tx); err != nil {
+		// working is already a private deep copy, so the unexported worker is
+		// enough. The public Autofill wrapper would clone it a second time.
+		if err := c.autofill(&working, 0); err != nil {
+			return "", err
+		}
+	} else {
+		identity, err := c.ensureNetworkIdentity()
+		if err != nil {
+			return "", err
+		}
+		if err := clientinternal.ApplyNetworkIDPolicy(working, identity); err != nil {
 			return "", err
 		}
 	}
 
-	// Sign the transaction.
-	txBlob, _, err := wallet.Sign(tx)
+	txBlob, _, err := wallet.Sign(working)
 	if err != nil {
 		return "", err
 	}

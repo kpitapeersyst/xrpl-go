@@ -1,11 +1,13 @@
 package transaction
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Peersyst/xrpl-go/xrpl/testutil"
 	"github.com/Peersyst/xrpl-go/xrpl/transaction/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test transaction constants
@@ -121,6 +123,7 @@ func TestBatchFlatten(t *testing.T) {
 							"TransactionType": "Payment",
 							"Flags": 1073741824,
 							"Sequence": 5,
+							"SigningPubKey": "",
 							"Amount": "6000000",
 							"Destination": "rUser2fDds782Bd6eK15RDnGMtxf7m"
 						}
@@ -164,6 +167,7 @@ func TestBatchFlatten(t *testing.T) {
 							"TransactionType": "OfferCreate",
 							"Flags": 1073741824,
 							"Sequence": 10,
+							"SigningPubKey": "",
 							"TakerGets": "1000000",
 							"TakerPays": {
 								"currency": "USD",
@@ -178,6 +182,7 @@ func TestBatchFlatten(t *testing.T) {
 							"TransactionType": "Payment",
 							"Flags": 1073741824,
 							"Sequence": 5,
+							"SigningPubKey": "",
 							"Amount": "6000000",
 							"Destination": "rUser2fDds782Bd6eK15RDnGMtxf7m"
 						}
@@ -221,6 +226,7 @@ func TestBatchFlatten(t *testing.T) {
 							"TransactionType": "Payment",
 							"Flags": 1073741824,
 							"Sequence": 5,
+							"SigningPubKey": "",
 							"Amount": "6000000",
 							"Destination": "rUser2fDds782Bd6eK15RDnGMtxf7m"
 						}
@@ -266,9 +272,8 @@ func TestBatch_Validate(t *testing.T) {
 					Flags:           TfAllOrNothing,
 				},
 				RawTransactions: []types.RawTransaction{
-					{
-						RawTransaction: paymentTx.Flatten(),
-					},
+					{RawTransaction: paymentTx.Flatten()},
+					{RawTransaction: offerCreateTx.Flatten()},
 				},
 			},
 			expected: true,
@@ -333,7 +338,7 @@ func TestBatch_Validate(t *testing.T) {
 					{
 						RawTransaction: FlatTransaction{
 							"Account":         "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
-							"TransactionType": "Batch", // Nested batch not allowed
+							"TransactionType": BatchTx, // Nested batch not allowed
 							"Fee":             "0",
 							"Flags":           uint32(types.TfInnerBatchTxn),
 							"SigningPubKey":   "",
@@ -405,6 +410,38 @@ func TestBatch_Validate(t *testing.T) {
 			valid, err := tt.input.Validate()
 			if valid != tt.expected {
 				t.Errorf("expected %v, got %v, error: %v", tt.expected, valid, err)
+			}
+		})
+	}
+}
+
+func TestBatchValidateRawTransactionCount(t *testing.T) {
+	for _, count := range []int{0, 1, 2, 8, 9} {
+		t.Run(fmt.Sprintf("count %d", count), func(t *testing.T) {
+			rawTransactions := make([]types.RawTransaction, count)
+			for i := range rawTransactions {
+				rawTransactions[i] = types.RawTransaction{RawTransaction: paymentTx.Flatten()}
+			}
+			batch := Batch{
+				BaseTx: BaseTx{
+					Account:         "rNCFjv8Ek5oDrNiMJ3pw6eLLFtMjZLJnf2",
+					TransactionType: BatchTx,
+					Fee:             types.XRPCurrencyAmount(12),
+					Flags:           TfAllOrNothing,
+				},
+				RawTransactions: rawTransactions,
+			}
+
+			valid, err := batch.Validate()
+			if count == 2 || count == 8 {
+				assert.True(t, valid)
+				require.NoError(t, err)
+				return
+			}
+			assert.False(t, valid)
+			require.ErrorIs(t, err, ErrBatchRawTransactionsCount)
+			if count == 0 {
+				require.ErrorIs(t, err, ErrBatchRawTransactionsEmpty)
 			}
 		})
 	}

@@ -1,14 +1,21 @@
 //revive:disable:var-naming
 package types
 
-import "github.com/Peersyst/xrpl-go/xrpl/flag"
+import (
+	"github.com/Peersyst/xrpl-go/pkg/typecheck"
+	"github.com/Peersyst/xrpl-go/xrpl/flag"
+)
 
 const (
 	// TfInnerBatchTxn flag that must be set on inner transactions within a batch
 	TfInnerBatchTxn uint32 = 0x40000000
 )
 
-// RawTransaction represents the wrapper structure for transactions within a Batch.
+// RawTransaction represents the wrapper structure for a transaction within a Batch.
+//
+// The inner transaction Fee can be absent or the string "0". SigningPubKey
+// must be present and must be an empty string. LastLedgerSequence, Signers, and
+// TxnSignature are forbidden on inner transactions.
 type RawTransaction struct {
 	RawTransaction map[string]any `json:"RawTransaction"`
 }
@@ -32,7 +39,7 @@ func (r *RawTransaction) Validate() (bool, error) {
 
 func validateRawTransaction(rawTx map[string]any) (bool, error) {
 	// Check that TransactionType is not "Batch" (no nesting)
-	if txType, ok := rawTx["TransactionType"].(string); ok && txType == "Batch" {
+	if txType, ok := typecheck.ToString(rawTx["TransactionType"]); ok && txType == "Batch" {
 		return false, ErrBatchNestedTransaction
 	}
 
@@ -48,11 +55,10 @@ func validateRawTransaction(rawTx map[string]any) (bool, error) {
 		}
 	}
 
-	// SigningPubKey must be empty for inner transactions (or missing, which means empty)
-	if signingPubKeyField, exists := rawTx["SigningPubKey"]; exists {
-		if signingPubKey, ok := signingPubKeyField.(string); !ok || signingPubKey != "" {
-			return false, ErrBatchInnerTransactionInvalid
-		}
+	// SigningPubKey must be explicitly present and empty for inner transactions.
+	// An absent key yields nil, which fails the string assertion.
+	if signingPubKey, ok := rawTx["SigningPubKey"].(string); !ok || signingPubKey != "" {
+		return false, ErrBatchInnerTransactionInvalid
 	}
 
 	// Check for disallowed fields in inner transactions

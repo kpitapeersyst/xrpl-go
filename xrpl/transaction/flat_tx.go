@@ -49,7 +49,7 @@ func (f FlatTransaction) RequireTransactionType() error {
 
 // TxType returns the transaction type of the flattened transaction.
 func (f FlatTransaction) TxType() TxType {
-	txType, ok := f["TransactionType"].(string)
+	txType, ok := typecheck.ToString(f["TransactionType"])
 	if !ok {
 		return TxType("")
 	}

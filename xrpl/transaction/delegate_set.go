@@ -12,15 +12,16 @@ const (
 
 // NonDelegatableTransactionsMap defines the set of transaction types that cannot be delegated.
 var NonDelegatableTransactionsMap = map[string]uint8{
-	string(AccountSetTx):    0,
-	string(SetRegularKeyTx): 0,
-	string(SignerListSetTx): 0,
-	string(DelegateSetTx):   0,
-	string(AccountDeleteTx): 0,
+	AccountSetTx.String():    0,
+	SetRegularKeyTx.String(): 0,
+	SignerListSetTx.String(): 0,
+	DelegateSetTx.String():   0,
+	AccountDeleteTx.String(): 0,
+	BatchTx.String():         0,
 	// Pseudo transactions below:
-	"EnableAmendment": 0,
-	"SetFee":          0,
-	"UNLModify":       0,
+	EnableAmendmentTx.String(): 0,
+	SetFeeTx.String():          0,
+	UNLModifyTx.String():       0,
 }
 
 // DelegateSet allows an account to delegate a set of permissions to another account.
