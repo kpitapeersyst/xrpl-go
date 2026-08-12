@@ -106,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `ledger_hash` and `ledger_index` fields to `InfoRequest`, and `ledger_current_index` to `InfoResponse` for open-ledger responses.
 
+#### xrpl/queries/subscription/types
+
+- Added `BookChangesStreamType` for the `bookChanges` subscription notification discriminator.
+
 #### xrpl/transaction
 
 - Added centralized transaction type constants and `IsPseudoTransactionType` classification for `EnableAmendment`, `SetFee`, and `UNLModify`.
@@ -124,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ErrInvalidMaxRetries` and `ErrInvalidLastLedgerSequence` for non-positive retry limits and zero ledger boundaries.
 - Added `ErrInvalidFeeValue` and `ErrFeeHasTooManyDecimals` for fee validation.
 - Added `ErrResponseErrorFieldIsNotAString` for malformed RPC error responses.
+- Added `ErrInsecureAuthorization` and `ErrAuthorizationRequestFailed` for secure, redaction-safe authorized transport failures.
 
 #### xrpl/transaction/integration
 
@@ -165,6 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The client now discovers and caches network identity with `server_info` before an identity-dependent operation. A discovery failure fails the operation without mutation and is retried by a later operation.
 - Client-side submission helpers now discover and validate network identity before they sign an unsigned transaction, including when autofill is disabled. Use `wallet.Sign` for fully offline signing, or `WithNetworkIdentity` when trusted deployment configuration supplies the identity.
 - Network identity discovery now uses Clio `rippled_version` only when `build_version` is absent.
+- Authorized RPC requests now require a parsed HTTPS endpoint for every HTTP client, recognize header names case-insensitively and URL userinfo, and redact credential material from returned diagnostics. Standard `*http.Client` requests also reject authenticated plaintext redirects, while custom `HTTPClient` implementations remain supported on HTTPS and control their own redirects.
 
 #### xrpl/transaction
 
@@ -178,6 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing network identity or required build-version data now makes `Connect`, autofill, and unsigned signing fail closed instead of omitting `NetworkID`.
 - Client-side signing now applies network identity policy when autofill is disabled.
 - Network identity discovery now uses Clio `rippled_version` only when `build_version` is absent.
+- Documented the stream-handler concurrency, per-stream ordering, and unbuffered backpressure contract.
 
 ### Fixed
 
@@ -241,6 +248,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent callers now share one in-flight network identity discovery result, including failures, while later independent operations can retry.
 - Rippled prerelease versions with numeric suffixes now compare the suffix numerically.
 - Made autofill and unsigned signing fail closed when network identity discovery or validation fails, unless `WithNetworkIdentity` supplies an explicit trusted identity.
+- Rejected nil custom HTTP clients during configuration and request-time revalidation with `ErrNilHTTPClient` instead of allowing request-time panics.
+- Redacted bare authorization credentials and percent-encoded URL passwords from authorized RPC request errors.
+- Authorized RPC redirects now reject an HTTPS-to-HTTP downgrade before invoking the caller's `CheckRedirect`, so a callback never observes `Authorization` on a plaintext target.
 - Corrected fee precision and rounding with shared exact rational arithmetic, including fractional base fees and load factors, rippled-compatible integer `EscrowFinish` fulfillment scaling, final whole-drop ceiling, validated-ledger `LoanSet` signer data, and presence-aware zero base and owner-reserve fees.
 - Made submit options nil-safe without enabling autofill by default. Forced `fail_hard` for `AccountDelete`. Used the normal network fee for `VaultCreate` instead of the incremental owner reserve. The standard `maxFeeXRP` cap now applies. Normalized Payment `DeliverMax` to wire `Amount`. Prevented autofill and submission failures from changing caller-owned maps.
 - `AutofillMultisigned` now preserves a supplied `Fee`; when absent, it calculates the fee once with the signer count.
@@ -275,6 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Closed and invalidated WebSocket connections after write or write-deadline failures. The active read loop now attempts reconnection after any read error, not only close errors, within the existing `WithMaxReconnects` budget.
 - Made manual disconnect claim an in-progress reconnect socket before lifecycle cancellation so cancellation-driven invalidation cannot cause a false not-connected error.
 - Made reconnect backoff configuration immutable per client to prevent concurrent clients and reconnect tests from racing over shared delay state.
+- Dispatched `bookChanges` notifications to the exported book-changes handler with typed decoding and no duplicate handler delivery across reconnects. Automatic reconnects do not replay subscriptions, so callers must resubscribe.
 
 ## [v0.2.0]
 
