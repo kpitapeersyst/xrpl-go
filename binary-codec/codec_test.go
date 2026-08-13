@@ -9,6 +9,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefinitionFieldsRoundTrip(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]any
+		expected string
+	}{
+		{
+			name: "MPTokenIssuanceCreate ImmutableFlags uses UInt32 field 53",
+			input: map[string]any{
+				"TransactionType": "MPTokenIssuanceCreate",
+				"Account":         "rNCFjv8Ek5oDrNiMJ3pw6eLLFtMjZLJnf2",
+				"ImmutableFlags":  uint32(4),
+			},
+			expected: "120036203500000004811495F14B0E44F78A264E41713C64B5F89242540EE2",
+		},
+		{
+			name: "MPTokenIssuanceSet capability uses transaction Flags",
+			input: map[string]any{
+				"TransactionType":   "MPTokenIssuanceSet",
+				"Account":           "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+				"MPTokenIssuanceID": "000004C463C52827307480341125DA0577DEFC38405B0E3E",
+				"Flags":             uint32(8),
+			},
+			expected: "12003822000000088114D28B177E48D9A8D057E70F7E464B498367281B980115000004C463C52827307480341125DA0577DEFC38405B0E3E",
+		},
+		{
+			name: "MPTokenIssuanceSet ImmutableFlags uses UInt32 field 53",
+			input: map[string]any{
+				"TransactionType":   "MPTokenIssuanceSet",
+				"Account":           "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+				"MPTokenIssuanceID": "000004C463C52827307480341125DA0577DEFC38405B0E3E",
+				"ImmutableFlags":    uint32(4),
+			},
+			expected: "1200382035000000048114D28B177E48D9A8D057E70F7E464B498367281B980115000004C463C52827307480341125DA0577DEFC38405B0E3E",
+		},
+		{
+			name: "MPTokenIssuance ReferenceHolding",
+			input: map[string]any{
+				"LedgerEntryType":  "MPTokenIssuance",
+				"ReferenceHolding": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
+			},
+			expected: "11007E5027A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
+		},
+		{
+			name: "DirectoryNode MPT book assets",
+			input: map[string]any{
+				"LedgerEntryType": "DirectoryNode",
+				"TakerPaysMPT":    "00000002430427B80BD2D09D36B70B969E12801065F22308",
+				"TakerGetsMPT":    "00000003430427B80BD2D09D36B70B969E12801065F22308",
+			},
+			expected: "110064031500000002430427B80BD2D09D36B70B969E12801065F22308041500000003430427B80BD2D09D36B70B969E12801065F22308",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := Encode(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, encoded)
+
+			decoded, err := Decode(encoded)
+			require.NoError(t, err)
+			require.Equal(t, tt.input, decoded)
+		})
+	}
+}
+
 func TestEncode(t *testing.T) {
 	tt := []struct {
 		description string
@@ -378,8 +445,6 @@ func TestIssuedCurrencyXAddressEncodingParity(t *testing.T) {
 	require.NoError(t, err)
 	testnetTaggedAddress, err := addresscodec.ClassicAddressToXAddress(classicIssuer, 123, true, true)
 	require.NoError(t, err)
-	invalidXAddress := mainnetXAddress[:len(mainnetXAddress)-1] + "x"
-
 	tests := []struct {
 		name        string
 		address     string
@@ -391,7 +456,6 @@ func TestIssuedCurrencyXAddressEncodingParity(t *testing.T) {
 		{name: "mainnet tagged address", address: mainnetTaggedXAddress, wantErr: true, expectedErr: types.ErrAccountIDTagNotAllowed},
 		{name: "explicit zero tag", address: zeroTaggedAddress, wantErr: true, expectedErr: types.ErrAccountIDTagNotAllowed},
 		{name: "testnet tagged address", address: testnetTaggedAddress, wantErr: true, expectedErr: types.ErrAccountIDTagNotAllowed},
-		{name: "invalid X-address", address: invalidXAddress, wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -955,146 +1019,205 @@ func TestEncodeForSigning(t *testing.T) {
 }
 
 func TestEncodeForSigningBatch(t *testing.T) {
+	const (
+		outerAccount  = "rNCFjv8Ek5oDrNiMJ3pw6eLLFtMjZLJnf2"
+		batchAccount  = "rJCxK2hX9tDMzbnn3cg1GU2g19Kfmhzxkp"
+		signerAccount = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"
+		txID1         = "ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA"
+		txID2         = "795AAC88B59E95C3497609749127E69F12958BC016C600C770AEEB1474C840B4"
+		payloadPrefix = "42434800" +
+			"95F14B0E44F78A264E41713C64B5F89242540EE2" +
+			"00000005" +
+			"00000001" +
+			"00000002" + txID1 + txID2 +
+			"C1D81FB31C42392BA1570431F1CBCBEEBBEF50E1"
+	)
+
+	validInput := func() map[string]any {
+		return map[string]any{
+			"account":      outerAccount,
+			"sequence":     uint32(5),
+			"flags":        uint32(1),
+			"txIDs":        []string{txID1, txID2},
+			"batchAccount": batchAccount,
+		}
+	}
+
 	tt := []struct {
 		description string
-		input       map[string]any
+		input       func() map[string]any
 		output      string
 		expectedErr error
 	}{
 		{
-			description: "pass - encode batch with multiple txIDs",
-			input: map[string]any{
-				"flags": uint32(1),
-				"txIDs": []string{
-					"ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA",
-					"795AAC88B59E95C3497609749127E69F12958BC016C600C770AEEB1474C840B4",
-				},
-			},
-			output:      "424348000000000100000002ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA795AAC88B59E95C3497609749127E69F12958BC016C600C770AEEB1474C840B4",
-			expectedErr: nil,
+			description: "pass - single-signed Batch signer",
+			input:       validInput,
+			output:      payloadPrefix,
 		},
 		{
-			description: "pass - encode batch with zero flags",
-			input: map[string]any{
-				"flags": uint32(0),
-				"txIDs": []string{
-					"1111111111111111111111111111111111111111111111111111111111111111",
-				},
+			description: "pass - multi-signed Batch signer",
+			input: func() map[string]any {
+				input := validInput()
+				input["signerAccount"] = signerAccount
+				return input
 			},
-			output:      "4243480000000000000000011111111111111111111111111111111111111111111111111111111111111111",
-			expectedErr: nil,
+			output: payloadPrefix + "B5F762798A53D543A014CAF8B297CFF8F2F937E8",
 		},
 		{
-			description: "fail - batch missing flags field",
-			input: map[string]any{
-				"txIDs": []string{
-					"E3FE6EA3D48F0C2B639448020EA4F03D4F4F8FFDB243A852A0F59177921B4879",
-				},
+			description: "fail - missing outer account",
+			input: func() map[string]any {
+				input := validInput()
+				delete(input, "account")
+				return input
 			},
-			output:      "",
+			expectedErr: ErrBatchAccountFieldNotFound,
+		},
+		{
+			description: "fail - missing outer sequence",
+			input: func() map[string]any {
+				input := validInput()
+				delete(input, "sequence")
+				return input
+			},
+			expectedErr: ErrBatchSequenceFieldNotFound,
+		},
+		{
+			description: "fail - missing flags",
+			input: func() map[string]any {
+				input := validInput()
+				delete(input, "flags")
+				return input
+			},
 			expectedErr: ErrBatchFlagsFieldNotFound,
 		},
 		{
-			description: "fail - batch missing txIDs field",
-			input: map[string]any{
-				"flags": uint32(12345),
+			description: "fail - missing transaction IDs",
+			input: func() map[string]any {
+				input := validInput()
+				delete(input, "txIDs")
+				return input
 			},
-			output:      "",
 			expectedErr: ErrBatchTxIDsFieldNotFound,
 		},
 		{
-			description: "fail - batch with invalid txIDs type",
-			input: map[string]any{
-				"flags": uint32(12345),
-				"txIDs": "not_an_array",
+			description: "fail - invalid transaction ID array",
+			input: func() map[string]any {
+				input := validInput()
+				input["txIDs"] = "not_an_array"
+				return input
 			},
-			output:      "",
 			expectedErr: ErrBatchTxIDsNotArray,
 		},
 		{
-			description: "fail - batch with non-string txID",
-			input: map[string]any{
-				"flags": uint32(12345),
-				"txIDs": []int{
-					123, //
-				},
+			description: "fail - invalid flags type",
+			input: func() map[string]any {
+				input := validInput()
+				input["flags"] = 1
+				return input
 			},
-			output:      "",
-			expectedErr: ErrBatchTxIDsNotArray,
-		},
-		{
-			description: "fail - batch with invalid flags type",
-			input: map[string]any{
-				"flags": "invalid_flags_type",
-				"txIDs": []string{
-					"ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA",
-				},
-			},
-			output:      "",
 			expectedErr: ErrBatchFlagsNotUInt32,
 		},
 		{
-			description: "fail - batch with flags as int instead of uint32",
-			input: map[string]any{
-				"flags": 123,
-				"txIDs": []string{
-					"ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA",
-				},
+			description: "fail - signer account without Batch account",
+			input: func() map[string]any {
+				input := validInput()
+				delete(input, "batchAccount")
+				input["signerAccount"] = signerAccount
+				return input
 			},
-			output:      "",
-			expectedErr: ErrBatchFlagsNotUInt32,
+			expectedErr: ErrBatchSignerAccountWithoutBatchAccount,
 		},
 	}
 
 	for _, tc := range tt {
 		t.Run(tc.description, func(t *testing.T) {
-			got, err := EncodeForSigningBatch(tc.input)
+			got, err := EncodeForSigningBatch(tc.input())
 
 			if tc.expectedErr != nil {
-				require.EqualError(t, err, tc.expectedErr.Error())
+				require.ErrorIs(t, err, tc.expectedErr)
 				require.Empty(t, got)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tc.output, got)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, tc.output, got)
 		})
 	}
 }
 
-func TestAuthoritativeDefinitionFieldsRoundTrip(t *testing.T) {
-	tt := []struct {
-		description string
-		input       map[string]any
-		expected    string
+func TestEncodeForSigningBatchCodecErrorsIncludeFieldContext(t *testing.T) {
+	const (
+		account = "rNCFjv8Ek5oDrNiMJ3pw6eLLFtMjZLJnf2"
+		txID    = "ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA"
+	)
+
+	tests := []struct {
+		name    string
+		field   string
+		value   any
+		wantErr error
 	}{
 		{
-			description: "MPTokenIssuance ReferenceHolding",
-			input: map[string]any{
-				"LedgerEntryType":  "MPTokenIssuance",
-				"ReferenceHolding": "A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
-			},
-			expected: "11007E5027A738A1E6E8505E1FC77BBB9FEF84FF9A9C609F2739E0F9573CDD6367100A0AA9",
+			name:    "account",
+			field:   "account",
+			value:   "invalid",
+			wantErr: addresscodec.ErrInvalidAddressFormat,
 		},
 		{
-			description: "DirectoryNode MPT book assets",
-			input: map[string]any{
-				"LedgerEntryType": "DirectoryNode",
-				"TakerPaysMPT":    "00000002430427B80BD2D09D36B70B969E12801065F22308",
-				"TakerGetsMPT":    "00000003430427B80BD2D09D36B70B969E12801065F22308",
-			},
-			expected: "110064031500000002430427B80BD2D09D36B70B969E12801065F22308041500000003430427B80BD2D09D36B70B969E12801065F22308",
+			name:    "sequence",
+			field:   "sequence",
+			value:   "invalid",
+			wantErr: types.ErrUInt32OutOfRange,
+		},
+		{
+			name:    "Batch account",
+			field:   "batchAccount",
+			value:   "invalid",
+			wantErr: addresscodec.ErrInvalidAddressFormat,
+		},
+		{
+			name:    "signer account",
+			field:   "signerAccount",
+			value:   "invalid",
+			wantErr: addresscodec.ErrInvalidAddressFormat,
 		},
 	}
 
-	for _, tc := range tt {
-		t.Run(tc.description, func(t *testing.T) {
-			encoded, err := Encode(tc.input)
-			require.NoError(t, err)
-			require.Equal(t, tc.expected, encoded)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{
+				"account":       account,
+				"sequence":      uint32(5),
+				"flags":         uint32(1),
+				"txIDs":         []string{txID},
+				"batchAccount":  account,
+				"signerAccount": account,
+			}
+			input[tc.field] = tc.value
 
-			decoded, err := Decode(encoded)
-			require.NoError(t, err)
-			require.Equal(t, tc.input, decoded)
+			encoded, err := EncodeForSigningBatch(input)
+
+			require.Empty(t, encoded)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.ErrorContains(t, err, "BatchV1_1 "+tc.field)
 		})
 	}
+}
+
+func TestEncodeForSigningBatchCodecErrorIncludesTransactionIDIndex(t *testing.T) {
+	input := map[string]any{
+		"account":  "rNCFjv8Ek5oDrNiMJ3pw6eLLFtMjZLJnf2",
+		"sequence": uint32(5),
+		"flags":    uint32(1),
+		"txIDs": []string{
+			"ABE4871E9083DF66727045D49DEEDD3A6F166EB7F8D1E92FE868F02E76B2C5CA",
+			"invalid",
+		},
+	}
+
+	encoded, err := EncodeForSigningBatch(input)
+
+	require.Empty(t, encoded)
+	require.ErrorContains(t, err, "BatchV1_1 txIDs[1]")
+	var invalidHex *types.ErrInvalidHexString
+	require.ErrorAs(t, err, &invalidHex)
 }

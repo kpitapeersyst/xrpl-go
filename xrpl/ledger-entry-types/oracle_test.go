@@ -36,7 +36,7 @@ func TestPriceData_Flatten(t *testing.T) {
 			},
 		},
 		{
-			name: "pass - explicit zero price",
+			name: "pass - explicit zero price omits default scale",
 			priceData: &PriceData{
 				BaseAsset:  "XRP",
 				QuoteAsset: "USD",
@@ -46,7 +46,6 @@ func TestPriceData_Flatten(t *testing.T) {
 				"BaseAsset":  "XRP",
 				"QuoteAsset": "USD",
 				"AssetPrice": "0000000000000000",
-				"Scale":      uint8(0),
 			},
 		},
 		{
@@ -283,10 +282,11 @@ func TestPriceData_Validate(t *testing.T) {
 			priceData: &PriceData{
 				BaseAsset:  "XRP",
 				QuoteAsset: "USD",
-				Scale:      11,
+				AssetPrice: AssetPrice(740),
+				Scale:      21,
 			},
 			expected: ErrPriceDataScale{
-				Value: 11,
+				Value: 21,
 				Limit: PriceDataScaleMax,
 			},
 		},
@@ -314,6 +314,16 @@ func TestPriceData_Validate(t *testing.T) {
 				BaseAsset:  "XRP",
 				QuoteAsset: "USD",
 				AssetPrice: AssetPrice(0),
+			},
+			expected: nil,
+		},
+		{
+			name: "pass - maximum scale",
+			priceData: &PriceData{
+				BaseAsset:  "XRP",
+				QuoteAsset: "USD",
+				AssetPrice: AssetPrice(740),
+				Scale:      PriceDataScaleMax,
 			},
 			expected: nil,
 		},

@@ -10,7 +10,7 @@ import (
 
 const (
 	// PriceDataScaleMax is the maximum scale for a price data.
-	PriceDataScaleMax uint8 = 10
+	PriceDataScaleMax uint8 = 20
 )
 
 // AssetPrice returns a pointer to an asset price value.
@@ -38,7 +38,7 @@ type PriceData struct {
 	// A non-nil zero value is an explicit zero price. Use AssetPrice to create a non-nil value.
 	AssetPrice *uint64
 	// The scaling factor to apply to an asset price. For example, if Scale is 6 and original price is 0.155,
-	// then the scaled price is 155000. Valid scale ranges are 0-10.
+	// then the scaled price is 155000. Valid scale ranges are 0-20.
 	// It's not included if the last update transaction didn't include the BaseAsset/QuoteAsset pair.
 	//
 	// By default, the scale is 0.
@@ -91,8 +91,9 @@ func (priceData *PriceData) Flatten() map[string]any {
 	if priceData.AssetPrice != nil {
 		// AssetPrice must be a hex string for the binary codec UInt64 type.
 		flattened["AssetPrice"] = fmt.Sprintf("%016X", *priceData.AssetPrice)
-		// Scale must be present with AssetPrice, including when Scale is zero.
-		flattened["Scale"] = priceData.Scale
+		if priceData.Scale != 0 {
+			flattened["Scale"] = priceData.Scale
+		}
 	}
 	if priceData.BaseAsset != "" {
 		flattened["BaseAsset"] = priceData.BaseAsset

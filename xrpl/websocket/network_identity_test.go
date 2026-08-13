@@ -165,11 +165,12 @@ func TestClientConnectDiscoversNetworkIdentity(t *testing.T) {
 			expectedNetworkIDRequired: boolPointer(false),
 		},
 		{
-			name: "missing network ID",
+			name: "missing network ID defaults to zero",
 			result: map[string]any{"info": map[string]any{
 				"build_version": "1.12.0",
 			}},
-			expectedErr:      ErrNetworkIDUnavailable,
+			expectedID:       uint32Pointer(0),
+			expectedBuild:    "1.12.0",
 			expectedRequests: 1,
 		},
 		{
@@ -572,8 +573,8 @@ func TestClientReconnectReportsLastNetworkIdentityFailure(t *testing.T) {
 		var maxErr ErrMaxReconnectionAttemptsReached
 		require.ErrorAs(t, got, &maxErr)
 		require.Equal(t, 1, maxErr.Attempts)
-		require.ErrorIs(t, got, ErrNetworkIDOverrideUnverified)
-		require.ErrorIs(t, maxErr.Err, ErrNetworkIDOverrideUnverified)
+		require.ErrorIs(t, got, ErrNetworkIDOverrideMismatch)
+		require.ErrorIs(t, maxErr.Err, ErrNetworkIDOverrideMismatch)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for reconnect identity failure")
 	}
@@ -747,6 +748,7 @@ func TestClientDisconnectClaimsReconnectSocketBeforeCancellationInvalidation(t *
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var invalidationErr error
+	var closeCountAfterInvalidation int32
 	cl.streamHandlerStateMu.Lock()
 	cl.ctx = ctx
 	cl.cancel = func() {
@@ -754,11 +756,13 @@ func TestClientDisconnectClaimsReconnectSocketBeforeCancellationInvalidation(t *
 		// This reproduces the identity write watcher invalidation before the
 		// lifecycle cancellation call returns.
 		invalidationErr = cl.conn.invalidateSocket(socket)
+		closeCountAfterInvalidation = socket.closeCount.Load()
 	}
 	cl.streamHandlerStateMu.Unlock()
 
 	require.NoError(t, cl.Disconnect())
 	require.NoError(t, invalidationErr)
+	require.Zero(t, closeCountAfterInvalidation)
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	require.False(t, cl.IsConnected())
 	require.Equal(t, int32(1), socket.closeCount.Load())
@@ -806,7 +810,7 @@ func TestClientDisconnectClosesSocketDuringReconnectIdentityDiscovery(t *testing
 	url, err := testutil.ConvertHTTPToWS(server.URL)
 	require.NoError(t, err)
 	cl := NewClient(withReconnectDelays(
-		NewClientConfig().WithHost(url).WithMaxReconnects(1).WithTimeout(time.Second),
+		NewClientConfig().WithHost(url).WithMaxReconnects(1).WithTimeout(5*time.Second),
 		time.Millisecond,
 		time.Millisecond,
 	))

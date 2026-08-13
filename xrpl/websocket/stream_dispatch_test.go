@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -57,13 +58,26 @@ func TestClient_HandleMessageDispatchesExportedStreams(t *testing.T) {
 			},
 		},
 		{
-			name:    "book changes",
-			message: `{"type":"bookChanges","ledger_index":14,"changes":[{"currency_a":"XRP_drops","currency_b":"issuer/USD","volume_a":"1","volume_b":"2","high":"3","low":"4","open":"5","close":"6"}]}`,
+			name:    "permissioned book changes",
+			message: `{"type":"bookChanges","ledger_index":14,"validated":true,"changes":[{"currency_a":"XRP_drops","currency_b":"issuer/USD","domain":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","volume_a":"1","volume_b":"2","high":"3","low":"4","open":"5","close":"6"}]}`,
 			register: func(c *Client, received chan<- bool) {
 				c.OnBookChanges(func(event *streamtypes.BookChangesStream) {
-					received <- event.Type == streamtypes.BookChangesStreamType &&
+					received <- event.Type == streamtypes.BookChangesStreamType && event.Validated &&
 						event.LedgerIndex == 14 && len(event.Changes) == 1 &&
-						event.Changes[0].CurrencyA == "XRP_drops" && event.Changes[0].VolumeA == "1"
+						event.Changes[0].CurrencyA == "XRP_drops" && event.Changes[0].VolumeA == "1" &&
+						event.Changes[0].Domain == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+				})
+			},
+		},
+		{
+			name:    "MPT book changes",
+			message: `{"type":"bookChanges","ledger_index":15,"validated":true,"changes":[{"mpt_issuance_id_a":"00000001C752C42A1EBD6BF2403134F7CFD2F1D835AFD26E","mpt_issuance_id_b":"00000001732B0822A31109C996BCDD7E64E05D446E7998EE","volume_a":"7","volume_b":"8","high":"9","low":"10","open":"11","close":"12"}]}`,
+			register: func(c *Client, received chan<- bool) {
+				c.OnBookChanges(func(event *streamtypes.BookChangesStream) {
+					received <- event.Type == streamtypes.BookChangesStreamType && event.Validated &&
+						event.LedgerIndex == 15 && len(event.Changes) == 1 &&
+						event.Changes[0].MPTIssuanceIDA == "00000001C752C42A1EBD6BF2403134F7CFD2F1D835AFD26E" &&
+						event.Changes[0].MPTIssuanceIDB == "00000001732B0822A31109C996BCDD7E64E05D446E7998EE"
 				})
 			},
 		},
@@ -202,6 +216,112 @@ func TestClient_StreamHandlersRunConcurrentlyAcrossStreams(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("different stream handler was blocked by ledger handler")
 	}
+}
+
+func TestClient_StreamHandlerDoesNotOverlapAfterDisconnectAndConnect(t *testing.T) {
+	var connectionCount atomic.Int32
+	upgrader := gorillaws.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	secondConnectionReady := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connectionNumber := connectionCount.Add(1)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		message := fmt.Appendf(nil, `{"type":"ledgerClosed","ledger_index":%d}`, connectionNumber)
+		if err := conn.WriteMessage(gorillaws.TextMessage, message); err != nil {
+			return
+		}
+		if connectionNumber == 2 {
+			close(secondConnectionReady)
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	url, err := testutil.ConvertHTTPToWS(server.URL)
+	require.NoError(t, err)
+	client := NewClient(
+		NewClientConfig().
+			WithHost(url).
+			WithTimeout(time.Second).
+			WithNetworkIdentity(0, "2.0.0"),
+	)
+	t.Cleanup(func() {
+		_ = client.Disconnect()
+	})
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	releaseFirstHandler := func() {
+		releaseFirstOnce.Do(func() { close(releaseFirst) })
+	}
+	t.Cleanup(releaseFirstHandler)
+	secondHandled := make(chan struct{})
+	var calls atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	client.OnLedgerClosed(func(*streamtypes.LedgerStream) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for previous := maxActive.Load(); current > previous; previous = maxActive.Load() {
+			if maxActive.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			return
+		}
+		close(secondHandled)
+	})
+
+	require.NoError(t, client.Connect())
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first stream handler")
+	}
+	require.NoError(t, client.Disconnect())
+
+	connectResult := make(chan error, 1)
+	go func() {
+		connectResult <- client.Connect()
+	}()
+	select {
+	case <-secondConnectionReady:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement connection")
+	}
+	select {
+	case err := <-connectResult:
+		t.Fatalf("Connect completed while the detached handler was active: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseFirstHandler()
+	select {
+	case err := <-connectResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement Connect")
+	}
+	select {
+	case <-secondHandled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement stream event")
+	}
+	require.Equal(t, int32(1), maxActive.Load())
+	require.Equal(t, int32(2), calls.Load())
 }
 
 func TestClient_StreamHandlerSingleDeliveryAcrossRepeatedReconnects(t *testing.T) {

@@ -1,9 +1,8 @@
 // Package websocket provides a client for connecting to an XRPL WebSocket server.
 //
-// A Client discovers network identity on every explicit Connect unless a
-// trusted identity was configured. Automatic background reconnects keep the
-// current discovered identity without another discovery request. Explicit
-// reconnects reject a change from the previous discovered network ID.
+// A Client discovers network identity on every connection unless a trusted
+// identity was configured. Explicit and automatic reconnects reject a change
+// from the previous discovered network ID.
 package websocket
 
 import (
@@ -110,9 +109,12 @@ type Client struct {
 	bookChangesStream  lifecycleStream[*streamtypes.BookChangesStream]
 	consensusStream    lifecycleStream[*streamtypes.ConsensusStream]
 
-	// streamHandlerStateMu protects ctx, cancel, and coordinated start/reset
-	// operations on the registered lifecycleStream runners.
+	// streamHandlerStateMu protects ctx, cancel, detachedHandlerRunners, and
+	// coordinated start/reset operations on the registered lifecycleStream runners.
 	streamHandlerStateMu sync.Mutex
+	// detachedHandlerRunners tracks canceled runners that can still be executing
+	// callbacks after Disconnect returns.
+	detachedHandlerRunners []<-chan struct{}
 	// streamHandlerResetMu serializes full lifecycle resets while old stream
 	// handler runners are waited on outside streamHandlerStateMu.
 	streamHandlerResetMu sync.Mutex
@@ -176,7 +178,9 @@ func (c *Client) resetLifecycle() context.Context {
 	c.streamHandlerStateMu.Lock()
 
 	c.cancel()
-	doneChannels := c.resetHandlerRunners()
+	doneChannels := append([]<-chan struct{}{}, c.detachedHandlerRunners...)
+	c.detachedHandlerRunners = nil
+	doneChannels = append(doneChannels, c.resetHandlerRunners()...)
 	c.streamHandlerStateMu.Unlock()
 
 	waitForHandlerRunners(doneChannels)
@@ -199,17 +203,21 @@ func (c *Client) lifecycleContext() context.Context {
 	return c.ctx
 }
 
-// cancelLifecycle cancels the current lifecycle and clears registered handler
-// runners under streamHandlerStateMu. It does not wait for runners to exit:
-// Disconnect is supported from inside a stream handler, where waiting would
-// deadlock the calling runner. Orphaned runners exit asynchronously when they
-// observe ctx.Done.
+// cancelLifecycle cancels the current lifecycle and detaches registered handler
+// runners under streamHandlerStateMu. It does not wait for runners to exit
+// because Disconnect is supported from inside a stream handler, where waiting
+// would deadlock the calling runner. Completion channels remain tracked so the
+// next lifecycle reset waits before it starts replacement runners.
 func (c *Client) cancelLifecycle() {
 	c.streamHandlerStateMu.Lock()
 	defer c.streamHandlerStateMu.Unlock()
 
 	c.cancel()
-	c.resetHandlerRunners()
+	for _, done := range c.resetHandlerRunners() {
+		if done != nil {
+			c.detachedHandlerRunners = append(c.detachedHandlerRunners, done)
+		}
+	}
 }
 
 // cancelLifecycleForReplacement fails pending requests for the old connection
@@ -254,11 +262,18 @@ func (c *Client) connect(ctx context.Context, onBeforePublish func()) ([][]byte,
 	c.connectionHandshakeMu.Lock()
 	defer c.connectionHandshakeMu.Unlock()
 
-	conn, err := c.conn.beginConnect(ctx)
+	connectCtx := ctx
+	cancel := func() {}
+	if c.cfg.timeout > 0 {
+		connectCtx, cancel = context.WithTimeout(ctx, c.cfg.timeout)
+	}
+	defer cancel()
+
+	conn, err := c.conn.beginConnect(connectCtx)
 	if err != nil {
 		return nil, err
 	}
-	bufferedMessages, err := c.prepareNetworkIdentity(ctx, conn)
+	bufferedMessages, err := c.prepareNetworkIdentity(connectCtx, conn)
 	if err != nil {
 		if closeErr := c.conn.invalidateSocket(conn); closeErr != nil {
 			return nil, errors.Join(err, closeErr)
@@ -268,7 +283,7 @@ func (c *Client) connect(ctx context.Context, onBeforePublish func()) ([][]byte,
 	if onBeforePublish != nil {
 		onBeforePublish()
 	}
-	if err := c.conn.publishSocket(ctx, conn); err != nil {
+	if err := c.conn.publishSocket(connectCtx, conn); err != nil {
 		return nil, err
 	}
 	return bufferedMessages, nil
