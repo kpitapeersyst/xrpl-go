@@ -11,49 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### binary-codec
 
-- Added protocol definitions and canonical wire encoding for all five XLS-96 confidential MPT transaction types and their ledger fields.
+- Added XLS-96 confidential MPT fields and transaction definitions for `ConfidentialMPTSend`, `ConfidentialMPTConvert`, `ConfidentialMPTConvertBack`, `ConfidentialMPTMergeInbox`, and `ConfidentialMPTClawback`.
 
 #### confidential
 
-- Added CGo-backed ElGamal encryption, Pedersen commitments, context hashes, proof generation and verification, plus a no-CGo fallback that returns `ErrCgoRequired`.
-- Added checked-in `mpt-crypto` 1.0.2 bundles for Linux and macOS on AMD64 and ARM64, with dependency provenance, artifact checksums, and reproducible update tooling.
-- Added native, no-CGo, signed-vector, and pinned-ledger lifecycle release gates.
+- Added CGo bindings and vendored native libraries for XRPLF `mpt-crypto`, with a `!cgo` fallback and maintainer tooling for dependency updates.
+- Added hex-string APIs for ElGamal encryption, Pedersen commitments, context hashes, and zero-knowledge proof generation and verification.
+- Added `test-confidential` and `update-mpt-crypto` Makefile targets and an automated dependency-update workflow.
 
 #### confidential/builder
 
-- Added online `Build*` and offline `Prepare*` helpers for confidential MPT convert, convert-back, send, merge-inbox, and clawback transactions, including tickets, bounded decryption, destination tags, credentials, and optional auditors.
+- Added online `Build*` and offline `Prepare*` helpers for confidential MPT send, convert, convert-back, clawback, and inbox-merge transactions.
 
 #### docs
 
-- Added XLS-96 package, platform, security, fee, compatibility, and builder documentation.
+- Added confidential MPT documentation covering the CGo requirement, package layout, transaction types, and high-level builders.
 
 #### pkg/hexutil
 
 - Added `DecodeFixedHex()` to decode hexadecimal values and enforce their decoded byte length.
 
+#### xrpl
+
+- Added confidential-transfer flags and encryption-key fields to MPT issuance transaction and ledger-entry models.
+- Added confidential balance fields to `MPToken`, five confidential MPT transaction models, and supporting amount, encryption-key, hex-blob, blinding-factor, and proof validation helpers.
+
 #### xrpl/hash
 
-- Added `MPToken()` and `MPTokenIssuance()` helpers for computing MPT ledger-entry indexes.
-
-#### xrpl/transaction
-
-- Added five confidential MPT transaction models, protocol role and amount validation, confidential issuance flags and encryption keys, and confidential ledger-entry fields.
-
-#### xrpl/wallet
-
-- Added pinned `xrpld` signed-transaction vectors for all five confidential MPT transaction types.
-
-### Changed
-
-#### xrpl/rpc
-
-- Confidential MPT autofill now applies the protocol 10× base-fee multiplier, including multisigning and Batch inner fees.
-
-#### xrpl/websocket
-
-- Confidential MPT autofill now applies the protocol 10× base-fee multiplier, including multisigning and Batch inner fees.
+- Added `MPToken()` and `MPTokenIssuance()` helpers for computing MPT ledger-entry keylet indexes.
 
 ### Fixed
+
+#### confidential
+
+- Tightened participant and fixed-size proof validation before invoking the native verifier, and aligned proof helper naming with the current `mpt-crypto` contract.
 
 #### dependencies
 
@@ -61,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### xrpl/transaction
 
-- Confidential encryption keys, ciphertexts, and commitments now require valid compressed secp256k1 points. Issuance IDs, amounts, and issuer/holder roles now follow XLS-96 and current `rippled` validation.
+- Corrected confidential transaction key encoding and proof-size validation.
 
 ## [v0.3.0]
 
