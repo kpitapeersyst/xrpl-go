@@ -239,6 +239,9 @@ func (m *MPTokenIssuanceSet) Validate() (bool, error) {
 	if m.Flags == 0 && !isMutate && m.DomainID == nil {
 		return false, ErrMPTIssuanceSetEmpty
 	}
+	if m.Holder != nil && hasEncryptionKeys {
+		return false, ErrMPTIssuanceSetKeyConflict
+	}
 	if m.Holder != nil && (isMutate || m.DomainID != nil) {
 		return false, ErrMPTIssuanceSetHolderMutuallyExclusive
 	}
