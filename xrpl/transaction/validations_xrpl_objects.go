@@ -1,7 +1,6 @@
 package transaction
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,6 +25,8 @@ const (
 	StandardCurrencyCodeLen = 3
 	// Hex256Length is the number of characters in a 256-bit hexadecimal value.
 	Hex256Length = 64
+	// MPTIssuanceIDLength is the hex-encoded length of a 24-byte MPT issuance ID (48 hex chars).
+	MPTIssuanceIDLength = 48
 )
 
 // *************************
@@ -291,24 +292,7 @@ func IsLedgerEntryID(input string) bool {
 
 // IsMPTIssuanceID checks if the given hex string is a valid 24-byte MPT issuance ID (48 hex chars).
 func IsMPTIssuanceID(id string) bool {
-	return types.MPTIssuanceID(id).IsValid()
-}
-
-// IsMPTIssuanceIssuer reports whether account is the issuer encoded in an MPT issuance ID.
-// It accepts classic addresses and X-addresses.
-func IsMPTIssuanceIssuer(id string, account types.Address) bool {
-	issuanceID, ok := decodeMPTIssuanceID(id)
-	if !ok {
-		return false
-	}
-
-	accountID, _, err := decodeAddressAccountID(account)
-	if err != nil {
-		return false
-	}
-
-	issuerID := issuanceID[len(issuanceID)-addresscodec.AccountAddressLength:]
-	return bytes.Equal(issuerID, accountID)
+	return len(id) == MPTIssuanceIDLength && typecheck.IsHex(id)
 }
 
 // ValidateHexMetadata validates input is non-empty hex string of up to a certain length.
