@@ -42,13 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-#### confidential
+#### dependencies
 
-- Tightened participant and fixed-size proof validation before invoking the native verifier, and aligned proof helper naming with the current `mpt-crypto` contract.
-
-#### xrpl/transaction
-
-- Corrected confidential transaction key encoding and proof-size validation.
+- Raised the minimum Go version from 1.25.12 to 1.25.13 to fix the `net/url` quadratic path-resolution vulnerability (GO-2026-6218).
 
 ## [v0.3.0]
 
