@@ -167,7 +167,17 @@ bash <skill-dir>/scripts/fetch-xls.sh <number>
 
 ## Refreshing Refs
 
+Use the local sync script in this repo:
+
 ```bash
-cd packages/skills-build
-pnpm build:xrpl-standards
+python3 .agents/skills/xrpl-standards/scripts/sync-xls-standards.py
 ```
+
+Run with `--dry-run` to inspect changes without writing files.
+
+- `--extract` writes the compressed extracted summary.
+- Default writes full upstream `README.md` content.
+
+A GitHub Action also runs this script every Monday and Thursday at 06:00 UTC:
+
+- `.github/workflows/sync-xrpl-standards.yml`

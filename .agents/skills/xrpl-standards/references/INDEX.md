@@ -1,7 +1,6 @@
 # XRPL Standards Index
 
 ## identity
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 40 | Decentralized Identity on XRP Ledger | Final | `references/identity/xls-0040.md` |
@@ -9,7 +8,6 @@
 | 70 | On-Chain Credentials | Final | `references/identity/xls-0070.md` |
 
 ## tokens
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 10 | Non-Transferable Token (NTT) standard | Stagnant | `references/tokens/xls-0010.md` |
@@ -30,7 +28,6 @@
 | 96 | Confidential Transfers for Multi-Purpose Tokens | Draft | `references/tokens/xls-0096.md` |
 
 ## defi
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 30 | Automated Market Maker on XRPL | Final | `references/defi/xls-0030.md` |
@@ -44,7 +41,6 @@
 | 98 | Standard Metadata for Vaults | Draft | `references/defi/xls-0098.md` |
 
 ## payments
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 34 | Token-Enabled Escrows and Payment Channels | Withdrawn | `references/payments/xls-0034.md` |
@@ -56,7 +52,6 @@
 | 100 | Smart Escrows | Draft | `references/payments/xls-0100.md` |
 
 ## accounts
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 7 | Deletable Accounts | Final | `references/accounts/xls-0007.md` |
@@ -73,21 +68,18 @@
 | 86 | Firewall | Draft | `references/accounts/xls-0086.md` |
 
 ## data
-
 | XLS | Title | Status | File |
-|-----|-------|--------|------|
+| ----- | ------- | -------- | ------ |
 | 47 | Price Oracles on XRP Ledger | Final | `references/data/xls-0047.md` |
 | 78 | Subscriptions | Draft | `references/data/xls-0078.md` |
 
 ## cross-chain
-
 | XLS | Title | Status | File |
-|-----|-------|--------|------|
+| ----- | ------- | -------- | ------ |
 | 38 | Cross-Chain Bridge | Final | `references/cross-chain/xls-0038.md` |
 | 41 | XRPL Proof of Payment Standard (XPOP) | Final | `references/cross-chain/xls-0041.md` |
 
 ## smart-contracts
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 42 | XRPL Plugins | Stagnant | `references/smart-contracts/xls-0042.md` |
@@ -95,7 +87,6 @@
 | 102 | WASM VM | Draft | `references/smart-contracts/xls-0102.md` |
 
 ## core
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 1 | XLS Process and Guidelines | Living | `references/core/xls-0001.md` |
@@ -120,7 +111,6 @@
 | 97 | Formats, Fields and Flags | Final | `references/core/xls-0097.md` |
 
 ## ecosystem
-
 | XLS | Title | Status | File |
 | ----- | ------- | -------- | ------ |
 | 2 | XRPL destination information | Stagnant | `references/ecosystem/xls-0002.md` |
