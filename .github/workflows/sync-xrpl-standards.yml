@@ -31,7 +31,7 @@ jobs:
         id: refs
         run: |
           set -eu
-          if git diff --quiet -- .agents/skills/xrpl-standards/references; then
+          if [ -z "$(git status --porcelain -- .agents/skills/xrpl-standards/references)" ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No reference changes found."
             exit 0
@@ -39,9 +39,9 @@ jobs:
 
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
           echo "### XRPL-Standards reference changes" > /tmp/xls_summary.txt
-          git diff -- .agents/skills/xrpl-standards/references --stat >> /tmp/xls_summary.txt
+          git diff --stat -- .agents/skills/xrpl-standards/references >> /tmp/xls_summary.txt
           echo "diff_summary<<EOF" >> "$GITHUB_OUTPUT"
-          cat /tmp/xls_summary.txt
+          cat /tmp/xls_summary.txt >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Open pull request
