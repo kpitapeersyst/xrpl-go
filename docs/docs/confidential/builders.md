@@ -36,6 +36,11 @@ Use these for `ConfidentialMPTConvert`.
 
 `Amount == 0` is allowed here because zero-amount convert is the opt-in path for registering a holder key.
 
+First-time detection reads the holder's `MPToken`, which `ConfidentialMPTConvert` debits, so the entry
+must already exist. A holder that has not authorized the issuance gets `ErrMPTokenNotFound` instead of
+being treated as a first-time opt-in, and a failed read reports `ErrLedgerQuery` rather than silently
+taking the first-time path.
+
 ```go
 tx, err := builder.BuildConvert(client, builder.BuildConvertParams{
     Account:       holderAddress,
@@ -57,6 +62,8 @@ Use these for `ConfidentialMPTSend`.
 - Builds both Pedersen commitments and the composite send proof.
 
 This path requires the destination holder to already have a registered `HolderEncryptionKey`.
+
+`DestinationTag` and `CredentialIDs` are optional and forwarded to the transaction unchanged. Set `DestinationTag` when the destination is a hosted account, and `CredentialIDs` when the destination sits behind a permissioned domain.
 
 ```go
 tx, err := builder.BuildSend(client, builder.BuildSendParams{
@@ -110,15 +117,21 @@ Use these for `ConfidentialMPTClawback`.
 
 - Resolves the issuer sequence and issuer encryption key.
 - Reads the holder's `IssuerEncryptedBalance` from the ledger.
+- Decrypts that ciphertext with `IssuerPrivKey` to derive the amount.
 - Generates the equality proof that binds the clawback amount to the issuer-visible ciphertext.
+
+A clawback always removes the holder's complete confidential balance, so `BuildClawback` derives
+the amount rather than accepting one. The search is bounded by `BalanceRange` and additionally
+capped at the issuance's `ConfidentialOutstandingAmount`, which no holder balance can exceed.
+Supply the amount yourself only on the offline `PrepareClawback` path, via `ClawbackParams.Amount`.
 
 ```go
 tx, err := builder.BuildClawback(client, builder.BuildClawbackParams{
     Account:       issuerAddress,
     Holder:        holderAddress,
     IssuanceID:    issuanceID,
-    Amount:        50,
     IssuerPrivKey: issuerPrivKeyHex,
+    BalanceRange:  elgamal.AmountRange{Low: 0, High: 1_000},
 })
 ```
 
@@ -146,6 +159,14 @@ Choose `Build*` when you have access to a live ledger connection and want the SD
 - holder `MPToken` fields such as `HolderEncryptionKey`, `ConfidentialBalanceSpending`, `IssuerEncryptedBalance`, and `ConfidentialBalanceVersion`.
 
 Choose `Prepare*` when you already have those values and want deterministic, offline transaction assembly.
+
+Each proof commits to the transaction sequence, so a `Prepare*` helper that emits a proof rejects a
+zero `Sequence` with `ErrMissingSequence` rather than produce a proof a later autofill would
+invalidate. The two proof-free forms are exempt: `PrepareMergeInbox`, and `PrepareConvert` for a
+holder whose encryption key is already registered. Both accept a zero `Sequence` and can be autofilled.
+
+`Build*` also preflights the issuance capabilities the protocol requires, so a transaction the
+network would reject never costs a fee and a sequence.
 
 ## Typical flow
 
@@ -182,6 +203,18 @@ Most builder errors are explicit and map to missing ledger state or invalid inpu
 - `ErrEncryptionKeyNotSet`: the issuance does not yet have the issuer encryption key configured.
 - `ErrReceiverNotOptedIn`: the destination holder has no registered `HolderEncryptionKey`.
 - `ErrMPTokenNotFound`: the account does not yet have the expected `MPToken` ledger entry.
+- `ErrIssuanceNotFound`: the `MPTokenIssuance` ledger entry does not exist.
 - `ErrInsufficientBalance`: the requested confidential send or convert-back amount exceeds the decrypted balance.
+- `ErrMissingSequence`: a proof-bearing `Prepare*` helper was given a zero `Sequence`.
+- `ErrKeyMismatch`: the supplied public key differs from the one registered on the ledger.
+- `ErrInvalidCredentialIDs`: `BuildSendParams.CredentialIDs` is not a valid hexadecimal string
+  array. It wraps `transaction.ErrInvalidCredentialIDs`, so `errors.Is` matches either sentinel.
 - `elgamal.ErrInvalidAmountRange`: `BalanceRange` is inverted or its upper bound is `math.MaxUint64`.
-- `ErrCryptoFailed`: a cryptographic primitive failed, the provided private key does not match ledger state, or the current balance falls outside `BalanceRange`.
+- `ErrCryptoFailed`: a cryptographic primitive failed, or the current balance falls outside `BalanceRange`.
+
+The issuance capability checks mirror the conditions the network enforces:
+
+- `ErrConfidentialDisabled`: the issuance does not have `lsfMPTCanHoldConfidentialBalance` set.
+- `ErrTransferDisabled`: a confidential send needs `lsfMPTCanTransfer`, which the issuance does not have.
+- `ErrTransferFeeSet`: the issuance charges a transfer fee, which confidential sends forbid.
+- `ErrAmountExceedsOutstanding`: `BalanceRange.Low` is above the issuance `ConfidentialOutstandingAmount`.
