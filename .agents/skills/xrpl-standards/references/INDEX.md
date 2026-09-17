@@ -24,8 +24,8 @@
 | 61 | CrossCurrency NFTokenAcceptOffer | Stagnant | `references/tokens/xls-0061.md` |
 | 87 | Token Pre-Authorization | Stagnant | `references/tokens/xls-0087.md` |
 | 89 | Multi-Purpose Token Metadata Schema | Final | `references/tokens/xls-0089.md` |
-| 94 | Dynamic Multi-Purpose Tokens | Draft | `references/tokens/xls-0094.md` |
-| 96 | Confidential Transfers for Multi-Purpose Tokens | Draft | `references/tokens/xls-0096.md` |
+| 94 | Dynamic Multi-Purpose Tokens | Final | `references/tokens/xls-0094.md` |
+| 96 | Confidential Transfers for Multi-Purpose Tokens | Final | `references/tokens/xls-0096.md` |
 
 ## defi
 | XLS | Title | Status | File |
@@ -59,7 +59,7 @@
 | 39 | Clawback Support | Final | `references/accounts/xls-0039.md` |
 | 49 | Multiple Signer Lists | Draft | `references/accounts/xls-0049.md` |
 | 64 | Pseudo-Account | Draft | `references/accounts/xls-0064.md` |
-| 68 | Sponsored Fees and Reserves | Draft | `references/accounts/xls-0068.md` |
+| 68 | Sponsored Fees and Reserves | Final | `references/accounts/xls-0068.md` |
 | 71 | Initial Owner Reserve Exemption | Stagnant | `references/accounts/xls-0071.md` |
 | 74 | Account Permissions | Final | `references/accounts/xls-0074.md` |
 | 75 | Permission Delegation | Final | `references/accounts/xls-0075.md` |
@@ -117,3 +117,10 @@
 | 3 | Sharing and deeplinking signed transactions | Stagnant | `references/ecosystem/xls-0003.md` |
 | 4 | Trustline Add URI | Stagnant | `references/ecosystem/xls-0004.md` |
 | 6 | Standard for Visual Account Icons | Final | `references/ecosystem/xls-0006.md` |
+
+## UNCLASSIFIED
+| XLS | Title | Status | File |
+| ----- | ------- | -------- | ------ |
+| 90 | Permissioned Domains for MPTs | Draft | `references/UNCLASSIFIED/xls-0090.md` |
+| 99 | ElGamal Key Rotation for Confidential MPTs | Draft | `references/UNCLASSIFIED/xls-0099.md` |
+| 103 | On-Chain Cosigner | Draft | `references/UNCLASSIFIED/xls-0103.md` |
