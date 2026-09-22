@@ -19,6 +19,7 @@ jobs:
     outputs:
       release: ${{ steps.release.outputs.version }}
       portal_sha: ${{ steps.portal.outputs.commit }}
+      summary: ${{ steps.summary.outputs.summary }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,6 +54,15 @@ jobs:
           printf 'Portal commit: %s\n' "$PORTAL_SHA" > portal-source.txt
           python3 scripts/check-dev-portal.py portal "$RELEASE"
 
+      # Base64 keeps compiler text out of the output file syntax. The report job validates it.
+      - name: Export failure summary
+        id: summary
+        if: always()
+        run: |
+          if [ -f portal-summary.json ] && [ "$(stat -c %s portal-summary.json)" -le 500000 ]; then
+            echo "summary=$(base64 -w0 portal-summary.json)" >> "$GITHUB_OUTPUT"
+          fi
+
       # Do not print raw compiler output into the Actions command channel.
       - name: Upload build report
         if: always()
@@ -62,6 +72,7 @@ jobs:
           path: |
             portal-build.log
             portal-source.txt
+            portal-summary.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -87,6 +98,7 @@ jobs:
           CHECK_RESULT: ${{ needs.build.result }}
           RELEASE: ${{ needs.build.outputs.release }}
           PORTAL_SHA: ${{ needs.build.outputs.portal_sha }}
+          SUMMARY: ${{ needs.build.outputs.summary }}
         with:
           script: |
             const report = require('./scripts/dev-portal-issue.cjs');

@@ -24,11 +24,11 @@ The check uses a disposable GitHub-hosted runner, not a self-hosted runner. The 
 - Has network access for dependency downloads. Compilation is lower risk than running examples, but it is not risk-free.
 - Has a three-minute timeout per package and a forty-minute overall timeout.
 
-Compiler output goes to a log file, not the Actions workflow-command channel. The container cannot access the log file or Actions environment files. Only the separate reporting job has `issues: write`. That job does not download or execute build artifacts.
+Compiler output goes to a log file, not the Actions workflow-command channel. The container cannot access the log file or Actions environment files. After the build, the checker extracts failed packages and their compiler errors into `portal-summary.json`. The build job passes it base64-encoded as a job output. Only the separate reporting job has `issues: write`. That job does not download or execute build artifacts. It accepts only well-formed package and file paths from the summary, strips control characters and backticks from error messages, and renders messages as inline code.
 
 ## Failure reporting
 
-A failed build job opens one bot-owned issue in this repository, or updates and reopens the existing tracked issue. The issue links to the run and its `dev-portal-build-report` artifact. The artifact is retained for 30 days. Setup and dependency download errors also fail the job, so check the logs before changing documentation.
+A failed build job opens one bot-owned issue in this repository, or updates and reopens the existing tracked issue. The issue lists each failed package with its compiler errors, linked to the file and line at the checked portal commit. It also links to the run and its `dev-portal-build-report` artifact. The artifact is retained for 30 days. Setup and dependency download errors also fail the job, so check the logs before changing documentation.
 
 A successful build job comments on and closes an open tracked issue. Cancelled or skipped jobs leave it unchanged. Only runs on this repository's default branch can change issues. Manual runs on another branch can compile examples but cannot change issues.
 
@@ -42,4 +42,4 @@ To perform a full compilation check, use a disposable machine with Docker and a 
 python3 scripts/check-dev-portal.py /path/to/xrpl-dev-portal v0.3.1
 ```
 
-Replace the version with the stable release to check. Inspect `portal-build.log`. Keep the Go image digest in `scripts/check-dev-portal.py` current when maintaining this check.
+Replace the version with the stable release to check. Inspect `portal-build.log` and `portal-summary.json`. Keep the Go image digest in `scripts/check-dev-portal.py` current when maintaining this check.

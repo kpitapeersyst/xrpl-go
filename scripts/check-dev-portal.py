@@ -1,6 +1,7 @@
 """Build portal Go packages in a disposable container, never execute them."""
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -77,6 +78,35 @@ exit "$((failed != 0))"
 """
 
 
+SECTION = re.compile(r"=== (\./[A-Za-z0-9_./-]+) ===")
+LOCATION = re.compile(r"([A-Za-z0-9_./-]+\.go):(\d+)(?::(\d+))?: (.*)")
+# Progress lines from module resolution are noise, not errors.
+NOISE = re.compile(r"go: (downloading|finding|found|extracting) ")
+
+
+def summarize(log, total):
+    """Collect failed packages and their compiler errors from the build log."""
+    failed, current, errors = [], None, []
+    for line in log.splitlines():
+        if match := SECTION.fullmatch(line):
+            current, errors = match.group(1), []
+        elif current and line == f"FAIL {current}":
+            failed.append({"package": current[2:], "errors": errors[:10]})
+            current = None
+        elif current and line.startswith("\t") and errors:
+            # Go indents continuation lines, such as "have" and "want" details.
+            errors[-1]["message"] += " " + line.strip()
+        elif current and line and not line.startswith("# ") and not NOISE.match(line):
+            match = LOCATION.fullmatch(line)
+            if match:
+                file, row, column, message = match.groups()
+                errors.append({"file": file, "line": int(row), "column": int(column or 0),
+                               "message": message})
+            else:
+                errors.append({"message": line})
+    return {"checked": total, "failed": failed[:100]}
+
+
 def docker_command(source, name, packages):
     return [
         "docker", "run", "--rm", "--name", name,
@@ -101,6 +131,7 @@ def main():
     parser.add_argument("portal", type=Path)
     parser.add_argument("version")
     parser.add_argument("--report", type=Path, default=Path("portal-build.log"))
+    parser.add_argument("--summary", type=Path, default=Path("portal-summary.json"))
     args = parser.parse_args()
     name = "portal-check-" + uuid.uuid4().hex
     # The parent writes the report. The container cannot access it or GitHub files.
@@ -116,6 +147,9 @@ def main():
                 docker_command(source, name, packages),
                 stdout=report, stderr=subprocess.STDOUT, timeout=2400, check=False,
             )
+            report.flush()
+            summary = summarize(args.report.read_text(errors="replace"), len(packages))
+            args.summary.write_text(json.dumps(summary))
             return result.returncode
         except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             report.write(f"Check failed: {error}\n")
