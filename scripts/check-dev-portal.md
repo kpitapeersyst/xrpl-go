@@ -28,7 +28,7 @@ Compiler output goes to a log file, not the Actions workflow-command channel. Th
 
 ## Failure reporting
 
-A failed build job opens one bot-owned issue in this repository, or updates and reopens the existing tracked issue. The issue lists each failed package with its compiler errors, linked to the file and line at the checked portal commit. It also links to the run and its `dev-portal-build-report` artifact. The artifact is retained for 30 days. Setup and dependency download errors also fail the job, so check the logs before changing documentation.
+A failed build job updates the open bot-owned tracking issue in this repository. If none is open, it opens a new one. Closed issues are never reopened. The issue lists each failed package with its compiler errors, linked to the file and line at the checked portal commit. It also links to the run and its `dev-portal-build-report` artifact. The artifact is retained for 30 days. Setup and dependency download errors also fail the job, so check the logs before changing documentation.
 
 A successful build job comments on and closes an open tracked issue. Cancelled or skipped jobs leave it unchanged. Only runs on this repository's default branch can change issues. Manual runs on another branch can compile examples but cannot change issues.
 

@@ -92,14 +92,14 @@ module.exports = async function report({ github, context, env }) {
   const release = /^v\d+\.\d+\.\d+$/.test(env.RELEASE || '') ? env.RELEASE : 'unresolved';
   const commit = /^[a-f0-9]{40}$/.test(env.PORTAL_SHA || '') ? env.PORTAL_SHA : 'unresolved';
   const issues = await github.paginate(github.rest.issues.listForRepo, {
-    ...repo, state: 'all', creator: 'github-actions[bot]', per_page: 100,
+    ...repo, state: 'open', creator: 'github-actions[bot]', per_page: 100,
   });
-  const tracked = issues.filter(issue => !issue.pull_request && issue.body?.startsWith(marker));
-  // Prefer an open issue, then the most recently created closed issue.
-  tracked.sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open') || b.number - a.number);
-  const issue = tracked[0];
+  // Update the newest open tracked issue. A closed issue stays closed, and a new failure opens a new one.
+  const issue = issues
+    .filter(issue => !issue.pull_request && issue.body?.startsWith(marker))
+    .sort((a, b) => b.number - a.number)[0];
   if (result === 'success') {
-    if (issue?.state === 'open') {
+    if (issue) {
       await github.rest.issues.createComment({
         ...repo, issue_number: issue.number,
         body: `All developer portal Go examples compile against ${release}. [Workflow run](${run}).`,
@@ -117,7 +117,7 @@ module.exports = async function report({ github, context, env }) {
     : 'Developer portal Go example check failed';
   const body = renderBody({ release, commit, run, summary });
   if (issue) {
-    await github.rest.issues.update({ ...repo, issue_number: issue.number, state: 'open', title, body });
+    await github.rest.issues.update({ ...repo, issue_number: issue.number, title, body });
   } else {
     await github.rest.issues.create({ ...repo, title, body });
   }
